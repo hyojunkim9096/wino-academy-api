@@ -1,0 +1,53 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+      # initialization-fail-timeout: (기본값 유지 = 실패 시 부팅 실패하도록)
+
+  jpa:
+    # (명시해 두면 진단에 도움이 됨. 없어도 되지만 유지 추천)
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: validate        # 운영은 스키마 검증으로 fail-fast
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          time_zone: Asia/Seoul
+
+  sql:
+    init:
+      mode: never
+
+server:
+  forward-headers-strategy: native
+  http2:
+    enabled: true
+  compression:
+    enabled: true
+    min-response-size: 2KB
+    mime-types:
+      - application/json
+      - application/xml
+      - text/html
+      - text/plain
+      - text/css
+      - application/javascript
+      - text/javascript
+
+app:
+  cors:
+    allowed-origins:
+      - https://admin.your-domain.com
+
+storage:
+  attach:
+    base-path: ${ATTACH_BASE_PATH:/data/attach_file}
