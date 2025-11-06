@@ -1,3 +1,26 @@
+# =====================================================================
+# application-prod.yml (운영 전용)
+#  - ✅ 드라이버/URL/계정은 환경변수로 주입
+#  - ✅ ddl-auto=validate (운영은 검증만)
+# =====================================================================
+
+server:
+  forward-headers-strategy: native
+  http2:
+    enabled: true
+  compression:
+    enabled: true
+    min-response-size: 2KB
+    mime-types:
+      - application/json
+      - application/problem+json
+      - application/xml
+      - text/html
+      - text/plain
+      - text/css
+      - application/javascript
+      - text/javascript
+
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -10,44 +33,52 @@ spring:
       idle-timeout: 300000
       max-lifetime: 1800000
       connection-timeout: 30000
-      # initialization-fail-timeout: (기본값 유지 = 실패 시 부팅 실패하도록)
 
   jpa:
-    # (명시해 두면 진단에 도움이 됨. 없어도 되지만 유지 추천)
     database-platform: org.hibernate.dialect.MySQLDialect
     hibernate:
-      ddl-auto: validate        # 운영은 스키마 검증으로 fail-fast
+      ddl-auto: validate   # ✅ 운영은 스키마 검증만
     properties:
       hibernate:
         format_sql: false
         jdbc:
           time_zone: Asia/Seoul
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
 
   sql:
     init:
       mode: never
 
-server:
-  forward-headers-strategy: native
-  http2:
-    enabled: true
-  compression:
-    enabled: true
-    min-response-size: 2KB
-    mime-types:
-      - application/json
-      - application/xml
-      - text/html
-      - text/plain
-      - text/css
-      - application/javascript
-      - text/javascript
-
-app:
-  cors:
-    allowed-origins:
-      - https://admin.your-domain.com
-
 storage:
   attach:
     base-path: ${ATTACH_BASE_PATH:/data/attach_file}
+
+app:
+  geo:
+    geocoding:
+      enabled: false
+  external:
+    school:
+      schoolinfo:
+        enabled: true
+        api-key: ${SCHOOLINFO_API_KEY}
+        page-size: 800
+        throttle-ms: 500
+        timeout:
+          connect-ms: 5000
+          read-ms: 30000
+        http:
+          max-total: 80
+          max-per-route: 20
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true

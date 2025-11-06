@@ -1,32 +1,24 @@
-// backend/wino-academy-api/build.gradle
 /*
  * Gradle 빌드 스크립트 — 전체 주석본
  *
- * 목적
- *  1) 테스트(@SpringBootTest) 시에도 DataSource가 정상 생성되도록
- *     - testRuntimeOnly에 MySQL 드라이버 추가 (중요)
- *     - (권장) testImplementation에 H2 추가 → test 프로필에서 메모리 DB로 빠르게/안정적으로 구동 가능
- *  2) 의존성 중복/누락 없이 깔끔하게 구성 (mail 스타터 1회만 선언)
- *  3) bootRun 시 프로필을 손쉽게 전환(-Pprofile=prod 등)
- *
- * 비고
- *  - 스프링부트 3.5.4, 의존성관리 1.1.5, Java 21 기준.
- *  - 실제 CI/배포에서 테스트를 MySQL로 돌릴지(H2 X) 여부는 프로필 yml로 제어하세요.
+ * 핵심 수정
+ *  1) ✅ MySQL 드라이버 scope: runtimeOnly → implementation
+ *     - IDE에서 Application 런(run) 시에도 드라이버가 항상 클래스패스에 올라오도록 안전하게 변경
+ *  2) ✅ testRuntimeOnly에도 드라이버 유지 (통합테스트시 필요할 수 있음)
+ *  3) springdoc, httpclient5 등은 기존 유지
  */
 
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.5.4'                 // Spring Boot 플러그인
-    id 'io.spring.dependency-management' version '1.1.5'          // BOM/의존성 정리
+    id 'org.springframework.boot' version '3.5.4'
+    id 'io.spring.dependency-management' version '1.1.5'
 }
 
 group = 'com.wino'
 version = '0.0.1-SNAPSHOT'
 
 java {
-    // Java 21 소스/타깃 컴파일 (toolchain 사용 시 IDE/CI JDK 편차를 줄일 수 있음)
     sourceCompatibility = '21'
-    // 필요 시 toolchain 사용:
     // toolchain { languageVersion = JavaLanguageVersion.of(21) }
 }
 
@@ -36,25 +28,30 @@ repositories {
 
 dependencies {
     // ───────────────────── Spring Boot 스타터(핵심) ─────────────────────
-    implementation 'org.springframework.boot:spring-boot-starter-web'        // REST API
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'   // JPA/Hibernate
-    implementation 'org.springframework.boot:spring-boot-starter-security'   // Spring Security
-    implementation 'org.springframework.boot:spring-boot-starter-validation' // Bean Validation(JSR-380)
-    implementation 'org.springframework.boot:spring-boot-starter-mail'       // SMTP 메일 발송
-    implementation 'org.springframework.boot:spring-boot-starter-cache'      // 캐시(선택)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+
+    // ─────────────────────────── OpenAPI(Swagger UI) ───────────────────
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
 
     // ─────────────────────────── DB 드라이버 ────────────────────────────
-    runtimeOnly     'com.mysql:mysql-connector-j'     // 런타임(개발/운영) MySQL 드라이버
-    testRuntimeOnly 'com.mysql:mysql-connector-j'     // ✅ 테스트 런타임에도 드라이버 제공(중요; dataSource 누락 방지)
+    implementation 'com.mysql:mysql-connector-j'   // ✅ 드라이버
+    testRuntimeOnly 'com.mysql:mysql-connector-j'  // (테스트 런타임)
 
-    // (권장) 테스트 DB(H2) — test 프로필에서 메모리 DB로 컨텍스트를 빠르고 안정적으로 띄움
-    //  · application-test.yml에서 H2를 바라보게 하면 @SpringBootTest가 매우 안정적
+    // (권장) 테스트 DB(H2) — test 프로필에서 메모리 DB로 빠르게/안정적으로 구동
     testImplementation 'com.h2database:h2'
+
+    // ─────────────────────────── HTTP 클라이언트 ─────────────────────────
+    implementation 'org.apache.httpcomponents.client5:httpclient5'
 
     // ───────────────────────────── JWT ────────────────────────────────
     implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
     runtimeOnly   'io.jsonwebtoken:jjwt-impl:0.11.5'
-    runtimeOnly   'io.jsonwebtoken:jjwt-jackson:0.11.5' // JJWT JSON 직렬화(jackson)
+    runtimeOnly   'io.jsonwebtoken:jjwt-jackson:0.11.5'
 
     // ─────────────────────────── MyBatis(선택) ──────────────────────────
     implementation 'org.mybatis.spring.boot:mybatis-spring-boot-starter:3.0.3'
@@ -67,30 +64,16 @@ dependencies {
     annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
 
     // ───────────────────────────── Test ────────────────────────────────
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'   // JUnit/Jupiter 등
-    testImplementation 'org.springframework.security:spring-security-test'   // 시큐리티 테스트 유틸
-    // 필요 시 추가:
-    // testImplementation 'org.mockito:mockito-junit-jupiter'
-    // testImplementation 'org.assertj:assertj-core'
-    // testImplementation 'io.rest-assured:rest-assured'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
 }
 
 tasks.named('test') {
-    // JUnit 5 플랫폼 사용
     useJUnitPlatform()
-
-    // (옵션) 테스트 시 기본 프로필을 'test'로 강제하고 싶다면 주석 해제:
     // systemProperty "spring.profiles.active", (System.getProperty("spring.profiles.active") ?: "test")
 }
 
-/*
- * 실행 프로필 전환 가이드:
- *   ./gradlew bootRun                  → dev (기본)
- *   ./gradlew bootRun -Pprofile=prod  → prod
- *   ./gradlew bootRun -Pprofile=test  → test
- * IntelliJ Run 구성에서 VM options에 -Dspring.profiles.active=prod 설정 시 그 값이 우선합니다.
- */
 bootRun {
-    // 프로젝트 속성(profile)이 있으면 그 값 사용, 없으면 dev
+    // gradle bootRun -Pprofile=prod 처럼 프로필 전환 가능
     systemProperty "spring.profiles.active", (project.findProperty("profile") ?: "dev")
 }

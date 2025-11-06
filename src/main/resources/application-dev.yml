@@ -1,45 +1,57 @@
+# =====================================================================
+# application-dev.yml (개발/로컬 전용)
+#  - ✅ 드라이버/URL 명시 (DataSourceConfig에서 그대로 사용 가능)
+#  - ✅ ddl-auto=update (개발 편의)
+# =====================================================================
+
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${DB_URL:jdbc:mysql://localhost:3306/wino_db?useSSL=false&useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true}
+    url: ${DB_URL:jdbc:mysql://localhost:3306/wino_db?useSSL=false&useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:1234}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 3
-      idle-timeout: 300000      # 5분
-      max-lifetime: 1800000     # 30분
-      connection-timeout: 30000 # 30초
-      initialization-fail-timeout: -1  # ❗️풀 초기화 실패해도 부팅 계속(FAIL-FAST 끔)
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+      initialization-fail-timeout: -1   # ✅ 드라이버 지연 로딩/환경 준비 전 실패 방지
 
   jpa:
-    # ❗️부팅 시 DB에 붙지 않고도 EMF 생성 가능하도록 고정
     database-platform: org.hibernate.dialect.MySQLDialect
     hibernate:
-      ddl-auto: none            # ❗️부팅 시 스키마 검증/작업 안 함(연결 불필요)
+      ddl-auto: update
     properties:
       hibernate:
-        highlight_sql: true
         boot:
-          allow_jdbc_metadata_access: false  # ❗️JDBC 메타데이터 조회 금지(부트 타임 접속 방지)
+          allow_jdbc_metadata_access: false
         jdbc:
           time_zone: Asia/Seoul
 
-  sql:
-    init:
-      mode: never
+storage:
+  attach:
+    base-path: ${ATTACH_BASE_PATH:/Users/kimhyojun/projects/attach_file}
 
 logging:
   level:
     org.hibernate.SQL: debug
-    org.hibernate.orm.jdbc.bind: trace
+    org.hibernate.orm.jdbc.bind: off
+    com.wino.academyapi.domain.region: DEBUG
 
 app:
-  cors:
-    allowed-origins:
-      - http://localhost:5173
-      - http://127.0.0.1:5173
+  geo:
+    geocoding:
+      enabled: false
+  external:
+    school:
+      schoolinfo:
+        enabled: true
+        # api-key: ${SCHOOLINFO_API_KEY:로컬테스트용키}
+        # page-size: 800
+        # timeout:
+        #   read-ms: 20000
 
-storage:
-  attach:
-    base-path: ${ATTACH_BASE_PATH:"D:\\projects\\attach_file"}
+  school:
+    sync:
+      schedule-enabled: false

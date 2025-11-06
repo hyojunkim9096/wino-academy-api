@@ -1,8 +1,7 @@
-// src/main/java/com/wino/academyapi/domain/auth/controller/AuthSessionController.java
 package com.wino.academyapi.domain.auth.controller;
 
-import com.wino.academyapi.domain.admin.entity.AdminUser;
-import com.wino.academyapi.domain.admin.repository.AdminUserRepository;
+import com.wino.academyapi.domain.admin.staff.entity.AdminUser;
+import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
 import com.wino.academyapi.domain.auth.service.SessionService;
 import com.wino.academyapi.global.jwt.JwtProvider;
 import io.jsonwebtoken.Claims;
@@ -18,8 +17,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * /auth/me, /auth/ping, /auth/logout
- * ✅ 항상 JWT sid 기준으로 DB 세션 동기화/검증
+ * /api/auth/me, /api/auth/ping, /api/auth/logout
+ * - 항상 JWT sid 기준으로 세션 상태 동기화/검증
+ * - 프런트는 /api/auth/me.id 를 X-App-User-Id 헤더로 넘길 수 있다.
  */
 @RestController
 @RequiredArgsConstructor
@@ -41,12 +41,13 @@ public class AuthSessionController {
 
         long remaining = 0L;
         if (sid != null && !sid.isBlank()) {
-            // ✅ 세션이 비정상이어도 예외 대신 0 처리
+            // 세션이 비정상이어도 예외 대신 0 처리
             remaining = sessionService.remainingSeconds(sid);
         }
         LocalDateTime exp = LocalDateTime.now().plusSeconds(Math.max(0, remaining));
 
         Map<String, Object> body = new HashMap<>();
+        body.put("id", u.getId());                // ✅ 프런트 공통헤더용 (X-App-User-Id)
         body.put("userId", u.getUserId());
         body.put("userName", u.getUserName());
         body.put("remainingSeconds", remaining);

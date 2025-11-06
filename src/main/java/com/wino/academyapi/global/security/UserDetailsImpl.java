@@ -1,7 +1,7 @@
 // src/main/java/com/wino/academyapi/global/security/UserDetailsImpl.java
 package com.wino.academyapi.global.security;
 
-import com.wino.academyapi.domain.admin.entity.AdminUser;
+import com.wino.academyapi.domain.admin.staff.entity.AdminUser;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;

@@ -1,7 +1,7 @@
 // src/main/java/com/wino/academyapi/domain/auth/dto/SignUpRequest.java
 package com.wino.academyapi.domain.auth.dto;
 
-import com.wino.academyapi.domain.admin.entity.EmployeeType;
+import com.wino.academyapi.domain.admin.staff.entity.EmployeeType;
 import jakarta.validation.constraints.*;
 
 import lombok.Getter;

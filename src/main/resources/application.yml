@@ -1,126 +1,126 @@
-# src/main/resources/application.yml
-# ─────────────────────────────────────────────────────────────────────────────
-# 공통(모든 프로필 공용) 설정의 기준 파일.
-# - DB, JPA ddl-auto, JDBC URL 같은 "환경 의존 항목"은 dev/prod/test 각 yml에서 관리.
-# - 여기서는 공통 동작/기본값/포맷/용량 한도 등을 정의한다.
-# - 기본 활성 프로필은 dev (spring.profiles.default 로 지정).
-# ─────────────────────────────────────────────────────────────────────────────
+# =====================================================================
+# application.yml (공통 기본 설정)
+# =====================================================================
+# 🔑 필요 ENV:
+#   REGION_API_URL, REGION_API_KEY, DB_* (Datasource),
+#   MAIL_*, SCHOOLINFO_API_KEY
+# =====================================================================
 
 server:
-  # 애플리케이션 기본 포트
   port: 8080
-  # (옵션) 톰캣이 큰 요청 본문에서 조용히 삼키는 문제 방지
   tomcat:
     max-swallow-size: 2MB
 
 spring:
   profiles:
-    # 기본 활성 프로필 (bootRun 등에서 별도 지정이 없을 때)
     default: dev
-
   jackson:
-    # 날짜/시간을 epoch 숫자 대신 ISO-8601 문자열로 직렬화
     serialization:
       write-dates-as-timestamps: false
-    # 역직렬화 시 컨텍스트 타임존으로 재조정하지 않음(값 왜곡 방지)
     deserialization:
       adjust-dates-to-context-time-zone: false
-    # 타임존을 KST로 고정 (DB/JPA/프론트와의 표현 일관성)
     time-zone: Asia/Seoul
-
   jpa:
-    # 웹 계층에서 영속성 컨텍스트 열어두지 않음 (N+1 악화 방지)
     open-in-view: false
     properties:
       hibernate:
-        # 콘솔/파일 로그에서 SQL을 보기 좋게 포맷
         format_sql: true
-        # 다건 조회 시 배치 페치 크기(컬렉션/연관 로딩 최적화)
         default_batch_fetch_size: 100
-    # ⚠ ddl-auto는 각 프로필(dev/prod/test)의 yml에서 지정 (여기선 지정하지 않음)
-
-  # === 멀티파트 업로드 (예: 이미지 업로드) ===
   servlet:
     multipart:
       enabled: true
       max-file-size: 20MB
       max-request-size: 20MB
-      # (옵션) 임시 파일로 쓸 임계값 — 메모리 사용량 제어
       file-size-threshold: 1MB
-
-  # === 메일 설정 (기본: Gmail SMTP) ===
-  # - 운영/개발 환경변수로 SPRING_MAIL_USERNAME / SPRING_MAIL_PASSWORD 필수
+  sql:
+    init:
+      mode: never
   mail:
     host: ${SPRING_MAIL_HOST:smtp.gmail.com}
     port: ${SPRING_MAIL_PORT:587}
-    username: ${SPRING_MAIL_USERNAME}          # 환경변수로 주입
-    password: ${SPRING_MAIL_PASSWORD}          # 앱 비밀번호(16자리)
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
     properties:
       mail.smtp.auth: true
       mail.smtp.starttls.enable: true
       mail.smtp.connectiontimeout: 5000
       mail.smtp.timeout: 5000
       mail.smtp.writetimeout: 5000
-      # 필요 시만 인증서 트러스트 추가:
-      # mail.smtp.ssl.trust: smtp.gmail.com
 
-  # === SQL 스크립트 자동 초기화(부트 내장) 기본 비활성화 ===
-  # - 'dataSource'가 없는 환경에서 초기화기가 뜨며 실패하는 걸 원천 차단
-  # - dev/prod/test에서 필요 시 개별 프로필에서만 켜세요.
-  sql:
-    init:
-      mode: never
+# ───────────────── OpenAPI(Swagger UI) ─────────────────
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    display-request-duration: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+    enabled: true
 
-# MyBatis를 사용하는 경우에만 유지(사용 안 하면 삭제해도 무방)
 mybatis:
   mapper-locations: classpath*:mappers/**/*.xml
   type-aliases-package: com.wino.academyapi.domain
   configuration:
     map-underscore-to-camel-case: true
 
-# === 애플리케이션 커스텀 설정 (공통 기본값) ===
-app:
-  jwt:
-    # 환경변수 JWT_SECRET_KEY 없으면 아래 기본값(정확히 32바이트) 사용
-    secret-key: ${JWT_SECRET_KEY:MySuperSecretKeyIsExactly32Byte!}
-    # 액세스 토큰 만료(ms) — 60분
-    expiration-ms: 3600000
+logging:
+  level: { }
 
-  crypto:
-    # AES-256 키(32바이트). 운영은 꼭 환경변수로 교체.
-    aes-key: ${AES_SECRET_KEY:0123456789ABCDEF0123456789ABCDEF}
-
-  mail:
-    # 발신자 표시 (username을 그대로 쓰되, 표시명만 입힘)
-    from: "WINO Support <${spring.mail.username}>"
-
-  security:
-    # 로그인 실패 허용 횟수/잠금 시간(분)
-    max-failed-attempts: 5
-    lock-minutes: 30
-
-  # CORS 기본(개발 편의용) — prod에서는 더 좁게 오버라이드 권장
-  cors:
-    allowed-origins:
-      - http://localhost:5173
-      - http://127.0.0.1:5173
-    # 필요 시 아래 항목도 확장 가능 (예시는 주석)
-    # allowed-methods: [GET,POST,PUT,PATCH,DELETE,OPTIONS]
-    # allowed-headers: ["*"]
-    # allow-credentials: true
-    # max-age: 3600
-
-# 세션 만료(분) — 서버 세션(또는 프론트의 토큰 만료 정책)과 조율
 session:
   minutes: 60
 
-# === 첨부파일 저장 루트 (공통 키) ===
-#  - dev/prod에서 환경별로 오버라이드 가능
-#  - 기본값에 Windows 경로의 ':' / '\'가 포함되어 placeholder 파싱이 깨질 수 있으므로
-#    SpEL #{'...'} 형태로 안전하게 기본값을 제공한다.
-storage:
-  attach:
-    # ⛑ 안전한 기본값(Windows). Linux/Mac 기본이 필요하면 경로를 바꿔주세요.
-    #   - 환경변수 ATTACH_BASE_PATH 가 있으면 그 값을 사용
-    #   - 없으면 D:\projects\attach_file 로 대체
-    base-path: ${ATTACH_BASE_PATH:#{'D:\\projects\\attach_file'}}
+app:
+  jwt:
+    secret-key: ${JWT_SECRET_KEY:MySuperSecretKeyIsExactly32Byte!}
+    expiration-ms: 3600000
+  crypto:
+    aes-key: ${AES_SECRET_KEY:0123456789ABCDEF0123456789ABCDEF}
+  mail:
+    from: ${MAIL_FROM:WINO Support <noreply@localhost>}
+
+  # 지오코딩은 전역 OFF (잔존 코드 가드)
+  geo:
+    geocoding:
+      enabled: false
+
+  external:
+    # 학교알리미(SCHOOLINFO) 연동
+    school:
+      schoolinfo:
+        enabled: true
+        url: https://www.schoolinfo.go.kr/openApi.do
+        api-key: ${SCHOOLINFO_API_KEY:}
+        page-size: 1000
+        throttle-ms: 400
+        timeout:
+          connect-ms: 5000
+          read-ms: 30000
+        http:
+          max-total: 50
+          max-per-route: 10
+
+  region:
+    sync:
+      enabled: true
+      api-url: ${REGION_API_URL:}
+      api-key: ${REGION_API_KEY:}
+      replace-all-on-refresh: true
+      auto-disable-missing: true
+      batch-size: 1000
+      http-max-total: 50
+      http-max-per-route: 10
+      http-connect-timeout-ms: 7000
+      http-read-timeout-ms: 30000
+      schedule-enabled: false
+      schedule-cron: "0 30 3 * * *"
+      schedule-zone: "Asia/Seoul"
+
+  school:
+    sync:
+      provider: SCHOOLINFO
+      schedule-enabled: false
+      schedule-cron: "0 0 4 * * *"
+      schedule-zone: "Asia/Seoul"
+      enrich-after: false
+      hard-stop-seconds: 3600

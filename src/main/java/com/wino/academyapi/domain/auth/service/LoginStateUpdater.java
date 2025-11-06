@@ -1,8 +1,8 @@
 // src/main/java/com/wino/academyapi/domain/auth/service/LoginStateUpdater.java
 package com.wino.academyapi.domain.auth.service;
 
-import com.wino.academyapi.domain.admin.entity.AdminUser;
-import com.wino.academyapi.domain.admin.repository.AdminUserRepository;
+import com.wino.academyapi.domain.admin.staff.entity.AdminUser;
+import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
