@@ -43,13 +43,14 @@ public class TeamAdminService {
 
     @Transactional(readOnly = true)
     public Page<TeamSummaryRes> search(String status, String workLocation, String keyword, Pageable pageable) {
-        Page<TeamGroup> page = teamGroupRepo.search(
+        // ✅ [N+1 성능 개선] (기존 수정 사항 유지)
+        Page<TeamSummaryRes> page = teamGroupRepo.searchWithSummary(
                 emptyToNull(status),
                 emptyToNull(workLocation),
                 emptyToNull(keyword),
                 pageable
         );
-        return page.map(this::toSummary);
+        return page;
     }
 
     @Transactional(readOnly = true)
@@ -77,9 +78,10 @@ public class TeamAdminService {
 
     @Transactional
     public Long create(UpsertTeamReq req) {
-        injectSessionVars(); // 동일 트랜잭션 커넥션에 @app_user_id/@event_note 설정
+        injectSessionVars();
 
         TeamGroup tg = new TeamGroup();
+        // ✅ 생성 시 팀 코드(teamCode) 설정
         tg.setTeamCode(trim(req.teamCode()));
         tg.setTeamName(Objects.requireNonNull(trim(req.teamName()), "teamName 필수"));
         tg.setDescription(trim(req.description()));
@@ -115,7 +117,8 @@ public class TeamAdminService {
         TeamGroup tg = teamGroupRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("팀이 존재하지 않습니다."));
 
-        tg.setTeamCode(trim(req.teamCode()));
+        // ✅ 수정 시에는 teamCode를 업데이트하지 않음 (고유값)
+
         tg.setTeamName(Objects.requireNonNull(trim(req.teamName()), "teamName 필수"));
         tg.setDescription(trim(req.description()));
         tg.setWorkLocation(trim(req.workLocation()));
@@ -144,6 +147,8 @@ public class TeamAdminService {
                 });
             }
         }
+
+        // (변경 감지로 인해 save 호출 불필요)
     }
 
     @Transactional
@@ -203,6 +208,11 @@ public class TeamAdminService {
             throw new IllegalArgumentException("팀/멤버 매칭이 올바르지 않습니다.");
         }
 
+        TeamGroup tg = tm.getTeam(); //
+
+        // ✅ [요청 1] 프론트에서 역할 <select>가 제거되었으므로,
+        // 이 로직은 "팀장지정" 버튼(setLeader)을 통해서만 처리됩니다.
+        // (단, 혹시 모를 API 직접 호출을 대비해 로직은 남겨둡니다.)
         if (req.roleInTeam() != null) {
             String role = req.roleInTeam().toUpperCase();
             tm.setRoleInTeam(role);
@@ -210,9 +220,9 @@ public class TeamAdminService {
                 teamMemberRepo.findActiveLeader(teamId).ifPresent(prev -> {
                     if (!Objects.equals(prev.getId(), tm.getId())) prev.setRoleInTeam("MEMBER");
                 });
-                tm.getTeam().setLeader(tm.getAdmin());
+                tg.setLeader(tm.getAdmin());
             } else {
-                TeamGroup tg = tm.getTeam();
+                //
                 if (tg.getLeader() != null && Objects.equals(tg.getLeader().getId(), tm.getAdmin().getId())) {
                     tg.setLeader(null);
                 }
@@ -221,7 +231,20 @@ public class TeamAdminService {
 
         if (req.activeYn() != null) {
             String v = "Y".equalsIgnoreCase(req.activeYn()) ? "Y" : "N";
-            if ("N".equals(v) && tm.getLeftAt() == null) tm.setLeftAt(java.time.LocalDateTime.now());
+
+            if ("N".equals(v)) {
+                //
+                tm.setLeftAt(java.time.LocalDateTime.now());
+
+                // ✅ [요청 2] 팀장이 비활성화되면 팀장 공석 처리
+                //
+                if (tg.getLeader() != null && Objects.equals(tg.getLeader().getId(), tm.getAdmin().getId())) {
+                    tg.setLeader(null); //
+                }
+            } else {
+                //
+                tm.setLeftAt(null);
+            }
             tm.setActiveYn(v);
         }
     }
@@ -268,16 +291,11 @@ public class TeamAdminService {
 
     // ===== 내부 유틸 =====
 
+    /* //  N+1
     private TeamSummaryRes toSummary(TeamGroup tg) {
-        String leaderName = tg.getLeader() != null ? safeUserName(tg.getLeader()) : null;
-        long cnt = teamMemberRepo.countActive(tg.getId());
-        return new TeamSummaryRes(
-                tg.getId(), tg.getTeamCode(), tg.getTeamName(), tg.getDescription(),
-                tg.getWorkLocation(), tg.getStatus(),
-                tg.getLeader() != null ? tg.getLeader().getId() : null,
-                leaderName, cnt, tg.getCreatedAt(), tg.getUpdatedAt()
-        );
+        ...
     }
+    */
 
     private TeamMemberRes toMemberRes(TeamMember m) {
         return new TeamMemberRes(
@@ -310,7 +328,8 @@ public class TeamAdminService {
             }
         }
         tm.setRoleInTeam("LEADER");
-        tm.setActiveYn("Y");
+        tm.setActiveYn("Y"); //
+        tm.setLeftAt(null); //
         teamMemberRepo.save(tm);
     }
 
