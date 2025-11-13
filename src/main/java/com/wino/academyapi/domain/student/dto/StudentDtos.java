@@ -5,19 +5,23 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.*;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
  * 학생 DTO 묶음 — 프런트 camelCase 규칙(표시/수정 모두 호환)
  * ✅ 메타(createdAt/createdByName/updatedAt/updatedByName) 필드 포함
+ * ✅ [수정] 'gender' 필드 추가
  */
 public class StudentDtos {
 
-    @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+    @Getter @Setter @NoArgsConstructor
+    @Builder // ✅ @Builder는 유지
+    // ✅ [오류 수정] @AllArgsConstructor 제거 (수동 생성자와 중복)
     public static class StudentSummary {
         private Long id;
 
         /** 로그인 노출(엔드유저 계정 연결) */
-        private Long userId;
+        private Long userId; // ✅ EndUser.id
         private String loginId;
 
         private String workLocationCode;
@@ -25,6 +29,7 @@ public class StudentDtos {
         private String status;
         private String name;
         private LocalDate birthdate;
+        private String gender; // ✅ [신규]
 
         private Long schoolId;
         private String schoolName;   // ✅ 표시용(서버에서 resolve)
@@ -51,6 +56,51 @@ public class StudentDtos {
         private String createdByName;
         private String updatedAt;
         private String updatedByName;
+
+        /**
+         * ✅ [신규] DTO 프로젝션(N+1 방지)용 생성자
+         * (gender 필드 추가)
+         */
+        public StudentSummary(
+                Long id, Long userId, String loginId, String workLocationCode, String schoolStage, String status,
+                String name, LocalDate birthdate, String gender, // ✅ [신규]
+                Long schoolId, String schoolName, String gradeLabel,
+                String phone, String email, boolean preferSms, boolean preferEmail, boolean preferPush,
+                String pushUserKey, String postalCode, String address, String detailAddress,
+                Long profileImageId, String photoUrl, String photoPath, String memo,
+                // (메타정보는 DTO 프로젝션에서 제외, 서비스 로직(enrichMeta)으로 채움)
+                String createdAt, String createdByName, String updatedAt, String updatedByName
+        ) {
+            this.id = id;
+            this.userId = userId;
+            this.loginId = loginId;
+            this.workLocationCode = workLocationCode;
+            this.schoolStage = schoolStage;
+            this.status = status;
+            this.name = name;
+            this.birthdate = birthdate;
+            this.gender = gender; // ✅ [신규]
+            this.schoolId = schoolId;
+            this.schoolName = schoolName;
+            this.gradeLabel = gradeLabel;
+            this.phone = phone;
+            this.email = email;
+            this.preferSms = preferSms;
+            this.preferEmail = preferEmail;
+            this.preferPush = preferPush;
+            this.pushUserKey = pushUserKey;
+            this.postalCode = postalCode;
+            this.address = address;
+            this.detailAddress = detailAddress;
+            this.profileImageId = profileImageId;
+            this.photoUrl = photoUrl; //
+            this.photoPath = photoPath; //
+            this.memo = memo;
+            this.createdAt = createdAt; //
+            this.createdByName = createdByName;
+            this.updatedAt = updatedAt;
+            this.updatedByName = updatedByName;
+        }
     }
 
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -60,6 +110,7 @@ public class StudentDtos {
         private String status;
         private String name;
         private LocalDate birthdate;
+        private String gender; // ✅ [신규]
         private Long schoolId;
         private String gradeLabel;   // ✅ 프런트에서 grade → gradeLabel 보정됨
         private String phone;
@@ -83,6 +134,7 @@ public class StudentDtos {
         private String status;
         private String name;
         private LocalDate birthdate;
+        private String gender; // ✅ [신규]
         private Long schoolId;
         private String gradeLabel;
         private String phone;

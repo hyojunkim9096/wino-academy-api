@@ -26,4 +26,20 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     long countActive(@Param("teamId") Long teamId);
 
     boolean existsByTeamIdAndAdminId(Long teamId, Long adminId);
+
+    // ✅ [신규] 특정 adminId가 속한 모든 '활성' 멤버십 조회 (권한 확인용)
+    @Query("""
+        select tm from TeamMember tm
+         where tm.admin.id = :adminId
+           and tm.activeYn = 'Y'
+    """)
+    List<TeamMember> findAllByAdminId(@Param("adminId") Long adminId);
+
+    // ✅ [신규] 특정 팀(teamId)에 속한 모든 활성 멤버의 adminId 목록 조회 (팀장 권한용)
+    @Query("""
+        select tm.admin.id from TeamMember tm
+         where tm.team.id = :teamId
+           and tm.activeYn = 'Y'
+    """)
+    List<Long> findActiveAdminIdsByTeamId(@Param("teamId") Long teamId);
 }

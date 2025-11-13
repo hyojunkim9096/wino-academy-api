@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/consult/controller/ConsultAdminFlatController.java
 package com.wino.academyapi.domain.consult.controller;
 
 import com.wino.academyapi.domain.consult.dto.ConsultDtos.*;
@@ -11,14 +12,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 
-/**
- * /api/admin/consults — 상담의 "캐논컬" 상단 컬렉션.
- * - 검색/등록/단건조회/수정/삭제 제공
- * - 학생/교사 기준의 뷰(필터)는 쿼리스트링으로 처리 (studentId, writerId, from, to 등)
- *
- * ⚠️ 쿼리스트링의 from/to는 ISO-8601 형식(예: 2025-10-26T00:00:00)으로 받습니다.
- * ⚠️ JSON 바디(LocalDateTime)도 ISO-8601 형식(‘T’ 포함)을 기대합니다.
- */
 @RestController
 @RequestMapping("/api/admin/consults")
 @Validated
@@ -30,11 +23,16 @@ public class ConsultAdminFlatController {
         this.service = service;
     }
 
-    /** 검색(필터링) — 학생/작성자/기간 등 */
+    /** ✅ [수정] 검색(필터링) — 이름(studentName, writerName) 파라미터 추가 */
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Page<ConsultSummary>> search(
+            // ID
             @RequestParam(required = false) Long studentId,
             @RequestParam(required = false) Long writerId,
+            //  ( )
+            @RequestParam(required = false) String studentName,
+            @RequestParam(required = false) String writerName,
+            //
             @RequestParam(required = false) @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(required = false) @DateTimeFormat(iso = ISO.DATE_TIME) LocalDateTime to,
             @RequestParam(defaultValue="0") int page,
@@ -42,14 +40,16 @@ public class ConsultAdminFlatController {
     ) {
         int safePage = Math.max(0, page);
         int safeSize = Math.min(Math.max(1, size), 100);
-        return ResponseEntity.ok(service.search(studentId, writerId, from, to, safePage, safeSize));
+
+        // ✅ 서비스 호출 시 이름 파라미터 전달
+        return ResponseEntity.ok(service.search(
+                studentId, studentName,
+                writerId, writerName,
+                from, to, safePage, safeSize
+        ));
     }
 
-    /**
-     * 등록(캐논컬) — Body에 studentId 필수.
-     * CanonicalCreate 그룹 검증을 적용하여 @NotNull(studentId) 포함 필수항목 검증.
-     * (별도 수동 null 체크 불필요)
-     */
+    /** 등록 (StudentAdminPage에서 수행하므로 여기서는 유지) */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Long> create(
             @RequestBody @Validated(CanonicalCreate.class) ConsultCreateRequest req
@@ -64,7 +64,7 @@ public class ConsultAdminFlatController {
         return ResponseEntity.ok(service.get(id));
     }
 
-    /** 수정(부분 업데이트, 필드 검증 없음) */
+    /** 수정 (모달에서 사용) */
     @PutMapping(value="/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Void> update(@PathVariable Long id, @RequestBody ConsultUpdateRequest req) {
         service.update(id, req);
@@ -76,5 +76,12 @@ public class ConsultAdminFlatController {
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    /** ✅ [신규] 팀장/관리자 승인 (유지) */
+    @PostMapping("/{id}/approve")
+    public ResponseEntity<Void> approve(@PathVariable Long id) {
+        service.approve(id);
+        return ResponseEntity.ok().build();
     }
 }

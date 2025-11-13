@@ -3,6 +3,7 @@ package com.wino.academyapi.domain.enduser.repository;
 
 import com.wino.academyapi.domain.enduser.entity.EndUserStudentMap;
 import org.springframework.data.jpa.repository.*;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -12,7 +13,9 @@ public interface EndUserStudentMapRepository extends JpaRepository<EndUserStuden
 
     List<EndUserStudentMap> findByStudentIdIn(Collection<Long> studentIds);
 
-    Optional<EndUserStudentMap> findByUserId(Long userId);
+    // PK(userId)로 조회는 JpaRepository의 findById로 대체 가능
+    // Optional<EndUserStudentMap> findByUserId(Long userId);
 
+    @Transactional //
     void deleteByStudentId(Long studentId);
 }

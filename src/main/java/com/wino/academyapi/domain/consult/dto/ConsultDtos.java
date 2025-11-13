@@ -17,13 +17,23 @@ public class ConsultDtos {
 
     /* ============================= 조회 DTO ============================= */
 
-    /** 조회 응답용(참석자 스냅샷 포함) */
+    /** * 조회 응답용 (참석자 + ✅ 학생/반/담임 정보 포함)
+     */
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
     public static class ConsultSummary {
         private Long id;
         private Long studentId;        // 학생 PK
+
+        // ✅ [수정] 학생/반/담임/작성자 정보 추가
+        private String studentName;
+        private Long classId;
+        private String className;
+        private Long homeroomTeacherId;
+        private String homeroomTeacherName;
         private Long writerId;         // 작성자(admin_user_info.id) — 최초 작성자
-        private boolean homeroomOk;    // 담임 공유 여부
+        private String writerName;
+
+        private boolean homeroomOk;    // 담임(팀장) 승인 여부
         private String consultMethod;  // 예: CALL/VISIT 등
         private String consultType;    // 예: REGULAR/EMERGENCY 등
         private String title;
@@ -55,7 +65,7 @@ public class ConsultDtos {
 
         /**
          * ⚠️ 서버에서 현재 로그인 사용자로 강제 세팅(최초 작성자).
-         *    클라이언트가 넣어도 서버에서 무시/대체합니다. (하위 호환을 위해 필드만 유지)
+         * 클라이언트가 넣어도 서버에서 무시/대체합니다. (하위 호환을 위해 필드만 유지)
          */
         private Long writerId;
 

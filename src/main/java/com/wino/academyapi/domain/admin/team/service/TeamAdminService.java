@@ -78,11 +78,11 @@ public class TeamAdminService {
 
     @Transactional
     public Long create(UpsertTeamReq req) {
-        injectSessionVars();
+        injectSessionVars(); // 동일 트랜잭션 커넥션에 @app_user_id/@event_note 설정
 
         TeamGroup tg = new TeamGroup();
-        // ✅ 생성 시 팀 코드(teamCode) 설정
-        tg.setTeamCode(trim(req.teamCode()));
+        // ✅ [수정] 생성 시 팀 코드(teamCode) 설정 (필수)
+        tg.setTeamCode(Objects.requireNonNull(trim(req.teamCode()), "teamCode 필수"));
         tg.setTeamName(Objects.requireNonNull(trim(req.teamName()), "teamName 필수"));
         tg.setDescription(trim(req.description()));
         tg.setWorkLocation(trim(req.workLocation()));
@@ -117,7 +117,8 @@ public class TeamAdminService {
         TeamGroup tg = teamGroupRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("팀이 존재하지 않습니다."));
 
-        // ✅ 수정 시에는 teamCode를 업데이트하지 않음 (고유값)
+        // ✅ [수정] 정책 일관성을 위해 teamCode는 수정하지 않습니다.
+        // tg.setTeamCode(trim(req.teamCode())); //
 
         tg.setTeamName(Objects.requireNonNull(trim(req.teamName()), "teamName 필수"));
         tg.setDescription(trim(req.description()));
@@ -147,8 +148,6 @@ public class TeamAdminService {
                 });
             }
         }
-
-        // (변경 감지로 인해 save 호출 불필요)
     }
 
     @Transactional
@@ -210,9 +209,6 @@ public class TeamAdminService {
 
         TeamGroup tg = tm.getTeam(); //
 
-        // ✅ [요청 1] 프론트에서 역할 <select>가 제거되었으므로,
-        // 이 로직은 "팀장지정" 버튼(setLeader)을 통해서만 처리됩니다.
-        // (단, 혹시 모를 API 직접 호출을 대비해 로직은 남겨둡니다.)
         if (req.roleInTeam() != null) {
             String role = req.roleInTeam().toUpperCase();
             tm.setRoleInTeam(role);
@@ -236,7 +232,7 @@ public class TeamAdminService {
                 //
                 tm.setLeftAt(java.time.LocalDateTime.now());
 
-                // ✅ [요청 2] 팀장이 비활성화되면 팀장 공석 처리
+                // ✅ [요청 2]
                 //
                 if (tg.getLeader() != null && Objects.equals(tg.getLeader().getId(), tm.getAdmin().getId())) {
                     tg.setLeader(null); //

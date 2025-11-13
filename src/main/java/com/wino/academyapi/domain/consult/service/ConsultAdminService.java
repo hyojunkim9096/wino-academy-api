@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/consult/service/ConsultAdminService.java
 package com.wino.academyapi.domain.consult.service;
 
 import com.wino.academyapi.domain.consult.dto.ConsultDtos.*;
@@ -17,11 +18,25 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+// ✅ [리팩토링] 권한 확인을 위해 import
+import com.wino.academyapi.domain.admin.staff.entity.AdminUser;
+import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
+import com.wino.academyapi.domain.admin.team.entity.TeamMember;
+import com.wino.academyapi.domain.admin.team.repository.TeamMemberRepository;
+
 import java.time.LocalDateTime;
-import java.util.List;
+// ✅ [오류 수정] 누락된 import 3개 추가
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Set;
+// (기존)
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.FORBIDDEN;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 @RequiredArgsConstructor
@@ -33,46 +48,138 @@ public class ConsultAdminService {
     private final GuardianRepository guardianRepo;
     private final DbSessionVars dbVars;
 
+    // ✅ [리팩토링] 권한 확인용 리포지토리 주입
+    private final AdminUserRepository adminUserRepo;
+    private final TeamMemberRepository teamMemberRepo;
+
+
     /** DB CHECK(chk_cn_type)에 맞춘 허용셋 — 필요 시 DB와 같이 늘려야 함 */
     private static final Set<String> ALLOWED_TYPES = Set.of("REGULAR", "EMERGENCY");
 
+    /** ✅ [리팩토링] 시스템 관리자(전체 조회) 역할 정의 (DB 공통코드 기준) */
+    private static final Set<String> SYSTEM_ADMIN_ROLES = Set.of(
+            "ROLE_SYSTEM_ADMIN",
+            "ROLE_PRESIDENT",
+            "ROLE_PRINCIPAL",
+            // ✅ [요청 반영] STAFF 역할군 전체 관리자 권한 부여
+            "ROLE_STAFF",
+            "ROLE_STAFF_INFO",
+            "ROLE_STAFF_ADMIN"
+    );
+
     /* ================================ 조회 ================================ */
 
-    /** 학생별 페이징 목록 */
+    /**
+     * ✅ [리팩토링] 학생별 목록 조회 (권한 검사 제거)
+     */
     @Transactional(readOnly = true)
     public Page<ConsultSummary> listByStudent(Long studentId, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
-        return repo.findByStudent(studentId, pageable).map(this::toSummaryWithAttendees);
+        // 1.
+        // PermissionScope scope = calculateScope(AppUserContext.getUserId());
+
+        // 2.
+        Pageable pageable = PageRequest.of(page, size); //
+
+        return repo.searchWithPermissions(
+                studentId, //
+                null,      //
+                null,      //
+                null,      //
+                null,      //
+                null,      //
+                pageable
+        );
     }
 
-    /** 상단 컬렉션 검색(학생/작성자/기간) */
+    /**
+     * ✅ [리팩토링] 상단 컬렉션 검색 (권한 검사 제거)
+     * - Long studentId, Long writerId (ID
+     * - String studentName, String writerName (
+     */
     @Transactional(readOnly = true)
-    public Page<ConsultSummary> search(Long studentId, Long writerId,
-                                       LocalDateTime from, LocalDateTime to,
-                                       int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
-        return repo.search(studentId, writerId, from, to, pageable)
-                .map(this::toSummaryWithAttendees);
+    public Page<ConsultSummary> search(
+            Long studentId, String studentName,
+            Long writerId, String writerName,
+            LocalDateTime from, LocalDateTime to,
+            int page, int size)
+    {
+        // 1.
+        // PermissionScope scope = calculateScope(AppUserContext.getUserId());
+
+        // 2.
+        Pageable pageable = PageRequest.of(page, size); //
+
+        return repo.searchWithPermissions(
+                studentId,   //
+                studentName, //
+                writerId,    //
+                writerName,  //
+                from,        //
+                to,          //
+                pageable
+        );
     }
 
-    /** 단건 조회 */
+    /**
+     * ✅ [수정] 이 메서드는 "승인(approve)" 시에만 사용됩니다.
+     * - 시스템 관리자: isSystemAdmin = true
+     * - 팀장: isSystemAdmin = false, viewableWriterIds = [팀원 ID 목록]
+     * - 팀원: isSystemAdmin = false, viewableWriterIds = [0L]
+     */
+    private PermissionScope calculateScope(Long currentAdminId) {
+        if (currentAdminId == null || currentAdminId <= 0) {
+            throw new ResponseStatusException(FORBIDDEN, "인증된 사용자만 조회할 수 있습니다.");
+        }
+
+        AdminUser currentUser = adminUserRepo.findById(currentAdminId)
+                .orElseThrow(() -> new ResponseStatusException(FORBIDDEN, "사용자 정보를 찾을 수 없습니다."));
+        String currentRole = currentUser.getRole();
+
+        // 1.
+        if (SYSTEM_ADMIN_ROLES.contains(currentRole)) {
+            return new PermissionScope(currentAdminId, true, List.of(0L));
+        }
+
+        // 2.
+        List<TeamMember> myMemberships = teamMemberRepo.findAllByAdminId(currentAdminId);
+        Set<Long> viewableIds = new HashSet<>();
+        for (TeamMember membership : myMemberships) {
+            if ("LEADER".equalsIgnoreCase(membership.getRoleInTeam())) {
+                List<Long> myTeamMemberIds = teamMemberRepo.findActiveAdminIdsByTeamId(membership.getTeam().getId());
+                if (myTeamMemberIds != null) {
+                    viewableIds.addAll(myTeamMemberIds);
+                }
+            }
+        }
+        return new PermissionScope(currentAdminId, false, viewableIds.isEmpty() ? List.of(0L) : new ArrayList<>(viewableIds));
+    }
+
+    /** 권한 범위 전달용 내부 record */
+    private record PermissionScope(
+            Long currentAdminId,
+            boolean isSystemAdmin,
+            List<Long> viewableWriterIds
+    ) {}
+
+    /** * 단건 조회
+     * ✅ [수정] 단건 조회 시에는 참석자(attendees) 목록을 채우기 위해 toSummaryWithAttendees를 사용합니다.
+     */
     @Transactional(readOnly = true)
     public ConsultSummary get(Long id) {
-        return repo.findById(id).map(this::toSummaryWithAttendees).orElseThrow();
+        return repo.findById(id).map(this::toSummaryWithAttendees)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "상담 기록을 찾을 수 없습니다."));
     }
 
     /* ================================ CUD ================================ */
 
-    /** 생성 */
+    /** 생성 (이 로직은 StudentAdminPage에서 호출될 수 있음) */
     @Transactional
     public Long create(ConsultCreateRequest p) {
-        // 트리거/히스토리용 세션 변수 (hist.event_by 등에서 사용)
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
-
-        // -------- 표준화/검증/기본값 --------
-        // ✅ 최초 작성자는 무조건 현재 로그인 사용자로 고정(클라이언트 writerId 무시)
         Long writerId = AppUserContext.getUserId();
-
+        if (writerId == null || writerId <= 0) {
+            throw new ResponseStatusException(FORBIDDEN, "인증된 사용자만 상담을 등록할 수 있습니다.");
+        }
         String method = upper(trim(p.getConsultMethod()));
         String type   = clampType(p.getConsultType());
         String title  = trim(p.getTitle());
@@ -81,17 +188,14 @@ public class ConsultAdminService {
         String vis    = upperOrNull(p.getVisibilityRole());
         LocalDateTime consultAt = (p.getConsultAt() != null) ? p.getConsultAt() : LocalDateTime.now();
         LocalDateTime nextAt    = p.getNextFollowupAt();
-
         if (isBlank(title) || isBlank(content)) {
             throw new ResponseStatusException(BAD_REQUEST, "title/content must not be blank");
         }
-
         Student s = studentRepo.findById(p.getStudentId()).orElseThrow();
-
         ConsultNote c = ConsultNote.builder()
                 .student(s)
-                .writerId(writerId)           // ✅ 메인 테이블에 최초 작성자 저장
-                .homeroomOk(p.isHomeroomOk())
+                .writerId(writerId)
+                .homeroomOk(false)
                 .consultMethod(method)
                 .consultType(type)
                 .title(title)
@@ -102,26 +206,21 @@ public class ConsultAdminService {
                 .visibilityRole(vis)
                 .useYn(p.isUseYn())
                 .build();
-
         Long id = repo.save(c).getId();
-
-        // 참석자 스냅샷 저장(전체 교체 방식)
         upsertAttendees(id, p.getAttendees());
-
         return id;
     }
 
-    /** 수정(부분 업데이트 + 참석자 전체 교체) */
+    /** 수정 */
     @Transactional
     public void update(Long id, ConsultUpdateRequest p) {
-        // 트리거/히스토리용 세션 변수 (hist.event_by 등)
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
-
         ConsultNote c = repo.findById(id).orElseThrow();
 
-        // writerId는 최초 작성자 고정 — 절대 변경하지 않음
+        // (권한 검증: 본인 또는 관리자만 수정 가능하도록 로직 추가 권장)
 
-        if (p.getHomeroomOk()!=null)    c.setHomeroomOk(p.getHomeroomOk());
+        // homeroomOk(승인) 필드는 이 API로 수정할 수 없음
+
         if (p.getConsultMethod()!=null) c.setConsultMethod(upper(trim(p.getConsultMethod())));
         if (p.getConsultType()!=null)   c.setConsultType(clampType(p.getConsultType()));
         if (p.getTitle()!=null)         c.setTitle(trim(p.getTitle()));
@@ -131,17 +230,42 @@ public class ConsultAdminService {
         if (p.getNextFollowupAt()!=null)c.setNextFollowupAt(p.getNextFollowupAt());
         if (p.getVisibilityRole()!=null)c.setVisibilityRole(upperOrNull(p.getVisibilityRole()));
         if (p.getUseYn()!=null)         c.setUseYn(p.getUseYn());
-
         if (p.getAttendees()!=null) {
             upsertAttendees(id, p.getAttendees());
         }
-
-        // 선택: 메인 테이블에도 수정자 남기고 싶다면(히스토리와 별개)
-        c.setUpdatedBy(AppUserContext.getUserId()); // 컬럼 존재(Nullable)하므로 안전
-        // @UpdateTimestamp가 updatedAt 자동 반영
+        c.setUpdatedBy(AppUserContext.getUserId());
     }
 
-    /** 삭제(자식 먼저 제거 후 본문 삭제) */
+    /** 승인 */
+    @Transactional
+    public void approve(Long consultId) {
+        Long currentAdminId = AppUserContext.getUserId();
+        if (currentAdminId == null || currentAdminId <= 0) {
+            throw new ResponseStatusException(FORBIDDEN, "승인 권한이 없습니다.");
+        }
+        dbVars.setAppVars(currentAdminId, "Approve Consultation");
+        ConsultNote c = repo.findById(consultId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "상담 기록을 찾을 수 없습니다."));
+        if (Objects.equals(c.getWriterId(), currentAdminId)) {
+            throw new ResponseStatusException(FORBIDDEN, "본인이 작성한 상담은 승인할 수 없습니다.");
+        }
+        PermissionScope scope = calculateScope(currentAdminId);
+        if (scope.isSystemAdmin()) {
+            c.setHomeroomOk(true);
+            c.setUpdatedBy(currentAdminId);
+            repo.save(c);
+            return;
+        }
+        if (scope.viewableWriterIds().contains(c.getWriterId())) {
+            c.setHomeroomOk(true);
+            c.setUpdatedBy(currentAdminId);
+            repo.save(c);
+            return;
+        }
+        throw new ResponseStatusException(FORBIDDEN, "이 상담 기록을 승인할 권한이 없습니다.");
+    }
+
+    /** 삭제 */
     @Transactional
     public void delete(Long id) {
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
@@ -151,11 +275,9 @@ public class ConsultAdminService {
 
     /* ============================== 내부 유틸 ============================== */
 
-    /** 참석자 스냅샷 전체 교체 */
     private void upsertAttendees(Long consultId, List<ConsultGuardianAttendee> list) {
         cgRepo.deleteByConsult_Id(consultId);
         if (list == null || list.isEmpty()) return;
-
         ConsultNote c = repo.getReferenceById(consultId);
         for (ConsultGuardianAttendee a : list) {
             Guardian g = (a.getGuardianId()!=null ? guardianRepo.findById(a.getGuardianId()).orElse(null) : null);
@@ -172,7 +294,6 @@ public class ConsultAdminService {
         }
     }
 
-    /** 엔티티 → 요약 DTO(+참석자) */
     private ConsultSummary toSummaryWithAttendees(ConsultNote c) {
         var attendees = cgRepo.findByConsult_Id(c.getId()).stream().map(gg ->
                 ConsultGuardianAttendee.builder()
@@ -185,10 +306,19 @@ public class ConsultAdminService {
                         .build()
         ).toList();
 
+        String studentName = c.getStudent() != null ? c.getStudent().getName() : null;
+        String writerName = c.getWriterId() != null ? adminUserRepo.findById(c.getWriterId()).map(AdminUser::getUserName).orElse(null) : null;
+
         return ConsultSummary.builder()
                 .id(c.getId())
                 .studentId(c.getStudent().getId())
-                .writerId(c.getWriterId())          // ✅ 최초 작성자 확인용
+                .studentName(studentName)
+                .classId(null)
+                .className(null)
+                .homeroomTeacherId(null)
+                .homeroomTeacherName(null)
+                .writerId(c.getWriterId())
+                .writerName(writerName)
                 .homeroomOk(c.isHomeroomOk())
                 .consultMethod(c.getConsultMethod())
                 .consultType(c.getConsultType())
@@ -199,22 +329,16 @@ public class ConsultAdminService {
                 .nextFollowupAt(c.getNextFollowupAt())
                 .visibilityRole(c.getVisibilityRole())
                 .useYn(c.isUseYn())
-                .createdAt(c.getCreatedAt())        // ✅ 프런트 표기용
-                .updatedAt(c.getUpdatedAt())        // ✅ 프런트 표기용
+                .createdAt(c.getCreatedAt())
+                .updatedAt(c.getUpdatedAt())
                 .attendees(attendees)
                 .build();
     }
-
-    /* -------- 문자열/코드 정규화 & 검증 -------- */
 
     private static String clampType(String value) {
         String up = upper(trim(value));
         if (up == null) {
             throw new ResponseStatusException(BAD_REQUEST, "consultType is required");
-        }
-        if (!ALLOWED_TYPES.contains(up)) {
-            // DB 체크 제약(chk_cn_type)을 사전 차단
-            throw new ResponseStatusException(BAD_REQUEST, "consultType must be one of " + ALLOWED_TYPES);
         }
         return up;
     }

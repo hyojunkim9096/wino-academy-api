@@ -8,10 +8,10 @@ import java.time.LocalDateTime;
 
 /**
  * end_user — 학생/보호자 공통 계정
- *  - user_type: STUDENT/GUARDIAN
- *  - login_id: 로컬 로그인 ID (NULL 허용, UNIQUE)
- *  - password_hash: 해시(알고리즘은 password_algo 참고)
- *  - ✅ created_at/updated_at 는 DB DEFAULT 가 없을 수도 있으므로 @PrePersist/@PreUpdate 로 보강
+ * - user_type: STUDENT/GUARDIAN
+ * - login_id: 로컬 로그인 ID (NULL 허용, UNIQUE)
+ * - password_hash: 해시(알고리즘은 password_algo 참고)
+ * - ✅ [수정] 1:1 매핑 (studentMap, guardianMap) 추가
  */
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
@@ -62,6 +62,17 @@ public class EndUser {
 
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
+
+    // ✅ [신규] 학생 매핑 (1:1)
+    //
+    @OneToOne(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+    private EndUserStudentMap studentMap;
+
+    // ✅ [신규] 보호자 매핑 (1:1)
+    //
+    @OneToOne(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+    private EndUserGuardianMap guardianMap;
+
 
     // ✅ DB default 가 없을 때도 안전하게 타임스탬프 확보
     @PrePersist

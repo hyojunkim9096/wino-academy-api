@@ -3,7 +3,12 @@ package com.wino.academyapi.domain.student.service;
 
 import com.wino.academyapi.domain.file.entity.AttachFile;
 import com.wino.academyapi.domain.student.dto.StudentDtos.*;
+// ✅ [신규] Sibling DTO import
+import com.wino.academyapi.domain.student.dto.StudentSiblingDtos.*;
 import com.wino.academyapi.domain.student.entity.Student;
+// ✅ [신규] Sibling 엔티티/리포지토리 import
+import com.wino.academyapi.domain.student.entity.StudentSibling;
+import com.wino.academyapi.domain.student.repository.StudentSiblingRepository;
 import com.wino.academyapi.domain.student.repository.StudentRepository;
 import com.wino.academyapi.global.audit.AppUserContext;
 import com.wino.academyapi.global.file.PublicUrlHelper;
@@ -15,17 +20,23 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-
+import org.springframework.web.server.ResponseStatusException;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Optional;
+// ✅ [오류 수정] Collectors, Stream, List import
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /* ✅ enduser 패키지 의존 */
 import com.wino.academyapi.domain.enduser.entity.EndUser;
 import com.wino.academyapi.domain.enduser.entity.EndUserStudentMap;
 import com.wino.academyapi.domain.enduser.repository.EndUserRepository;
 import com.wino.academyapi.domain.enduser.repository.EndUserStudentMapRepository;
+// ✅ [오류 수정] AttachFileRepository import
+import com.wino.academyapi.domain.file.repository.AttachFileRepository;
 
 /* ✅ 학교명 resolve */
 import com.wino.academyapi.domain.school.repository.SchoolRepository;
@@ -39,14 +50,20 @@ import com.wino.academyapi.domain.student.entity.StudentHist;
 import com.wino.academyapi.domain.student.repository.StudentHistRepository;
 import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
 
+import static org.springframework.http.HttpStatus.CONFLICT;
+import static org.springframework.http.HttpStatus.BAD_REQUEST; // ✅
+
 @Service
 @RequiredArgsConstructor
 public class StudentAdminService {
 
     private final StudentRepository repo;
-    private final LocalFileStorageService storage;
+    private final LocalFileStorageService storage; //
     private final PublicUrlHelper publicUrlHelper;
     private final DbSessionVars dbVars;
+
+    // ✅ [오류 수정] AttachFileRepository 주입 (storage가 아님)
+    private final AttachFileRepository fileRepo;
 
     /* enduser */
     private final EndUserRepository endUserRepo;
@@ -58,6 +75,9 @@ public class StudentAdminService {
 
     /* 학생 메모 */
     private final StudentMemoRepository memoRepo;
+
+    // ✅ [신규] 형제 리포지토리 주입
+    private final StudentSiblingRepository siblingRepo;
 
     /* 메타(히스토리 + 작성자명) */
     private final StudentHistRepository histRepo;
@@ -74,7 +94,35 @@ public class StudentAdminService {
         String stg = emptyToNull(stage);
         String wl  = emptyToNull(workLocation);
         String kw  = emptyToNull(keyword);
-        return repo.search(stg, wl, kw, pageable).map(this::toSummary);
+
+        // ✅ [수정] N+1이 해결된 DTO 프로젝션 쿼리 사용
+        Page<StudentSummary> summaryPage = repo.searchWithSummary(stg, wl, kw, pageable);
+
+        // ✅ [수정] DTO 프로젝션이 채우지 못한 메타정보(createdAt/By)와 사진URL(photoUrl)을 채웁니다.
+        summaryPage.getContent().forEach(dto -> {
+            // (1) 메타 정보 주입
+            enrichMeta(dto, dto.getId());
+            // (2) 사진 URL 주입
+            if (dto.getProfileImageId() != null) {
+                // ✅ [오류 수정] storage.findFileById -> fileRepo.findById
+                AttachFile f = fileRepo.findById(dto.getProfileImageId()).orElse(null);
+                if (f != null) {
+                    String relPath = null;
+                    if (hasText(f.getRelativePath())) relPath = normalizeSlash(f.getRelativePath());
+                    else if (hasText(f.getDirectory()) && hasText(f.getSavedName()))
+                        relPath = normalizeSlash(f.getDirectory() + "/" + f.getSavedName());
+
+                    String storedForUrl = null;
+                    if (hasText(f.getAbsolutePath())) storedForUrl = f.getAbsolutePath();
+                    else if (hasText(relPath))        storedForUrl = relPath;
+
+                    dto.setPhotoPath(relPath);
+                    dto.setPhotoUrl(storedForUrl != null ? publicUrlHelper.toPublicUrl(storedForUrl) : null);
+                }
+            }
+        });
+
+        return summaryPage;
     }
 
     @Transactional(readOnly = true)
@@ -95,8 +143,9 @@ public class StudentAdminService {
                 .status(p.getStatus() == null || p.getStatus().isBlank() ? "PENDING" : p.getStatus())
                 .name(p.getName())
                 .birthdate(p.getBirthdate())
+                .gender(p.getGender()) // ✅ [신규]
                 .schoolId(p.getSchoolId())
-                .gradeLabel(p.getGradeLabel())
+                .gradeLabel(p.getGradeLabel()) //
                 .phone(p.getPhone())
                 .email(p.getEmail())
                 .preferSms(p.isPreferSms())
@@ -109,10 +158,10 @@ public class StudentAdminService {
                 .build();
         s = repo.save(s);
 
-        // 요청에 메모가 왔다면 최신 메모로 1건 append
+        //
         if (hasText(p.getMemo())) {
             StudentMemo sm = StudentMemo.builder()
-                    .student(s)
+                    .student(s) //
                     .content(p.getMemo().trim())
                     .pinned(false)
                     .createdAt(LocalDateTime.now())
@@ -131,12 +180,13 @@ public class StudentAdminService {
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
         Student s = repo.findById(id).orElseThrow();
 
-        // 부분 업데이트 — null 아닌 필드만 반영
+        //
         if (p.getWorkLocationCode()!=null) s.setWorkLocationCode(p.getWorkLocationCode());
         if (p.getSchoolStage()!=null)      s.setSchoolStage(p.getSchoolStage());
         if (p.getStatus()!=null)           s.setStatus(p.getStatus());
         if (p.getName()!=null)             s.setName(p.getName());
         if (p.getBirthdate()!=null)        s.setBirthdate(p.getBirthdate());
+        if (p.getGender()!=null)           s.setGender(p.getGender()); // ✅ [신규]
         if (p.getSchoolId()!=null)         s.setSchoolId(p.getSchoolId());
         if (p.getGradeLabel()!=null)       s.setGradeLabel(p.getGradeLabel());
         if (p.getPhone()!=null)            s.setPhone(p.getPhone());
@@ -149,7 +199,7 @@ public class StudentAdminService {
         if (p.getAddress()!=null)          s.setAddress(p.getAddress());
         if (p.getDetailAddress()!=null)    s.setDetailAddress(p.getDetailAddress());
 
-        // 🔁 메모는 student_memo로 append
+        // 🔁
         if (p.getMemo()!=null && hasText(p.getMemo())) {
             StudentMemo sm = StudentMemo.builder()
                     .student(s)
@@ -163,7 +213,7 @@ public class StudentAdminService {
             memoRepo.save(sm);
         }
 
-        // 정합성 보강 — 연락수단 플래그/상태 기본값
+        //
         if (s.isPreferSms() && !hasText(s.getPhone()))   s.setPreferSms(false);
         if (s.isPreferEmail() && !hasText(s.getEmail())) s.setPreferEmail(false);
         if (s.getStatus() == null || s.getStatus().isBlank()) s.setStatus("ACTIVE");
@@ -172,9 +222,9 @@ public class StudentAdminService {
     @Transactional
     public void delete(Long id) {
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
-        // 매핑 선행 삭제 (고아 방지)
+        //
         mapRepo.deleteByStudentId(id);
-        // student_memo 등은 FK CASCADE 가정
+        // student_memo
         repo.deleteById(id);
     }
 
@@ -192,10 +242,8 @@ public class StudentAdminService {
     public void changePassword(Long studentId, String rawPw) {
         String trimmed = (rawPw == null ? "" : rawPw.trim());
         if (trimmed.length() < 6) throw new IllegalArgumentException("PASSWORD_TOO_SHORT");
-
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
         EndUser eu = ensureEndUserForStudent(studentId);
-
         eu.setPasswordHash(passwordEncoder.encode(trimmed));
         eu.setPasswordAlgo("bcrypt");
         eu.setUpdatedAt(LocalDateTime.now());
@@ -208,27 +256,23 @@ public class StudentAdminService {
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
         EndUser eu = ensureEndUserForStudent(studentId);
 
-        // loginId 변경(중복 체크)
         if (req != null && req.loginId() != null) {
             String login = req.loginId().trim();
             if (login.isEmpty()) {
-                eu.setLoginId(null); // 비우면 제거
+                eu.setLoginId(null);
             } else {
                 Optional<EndUser> dup = endUserRepo.findByLoginIdIgnoreCase(login);
                 if (dup.isPresent() && !dup.get().getId().equals(eu.getId()))
-                    throw new IllegalStateException("LOGIN_ID_DUP");
+                    throw new ResponseStatusException(CONFLICT, "LOGIN_ID_DUP");
                 eu.setLoginId(login);
             }
         }
-
-        // password 변경(조건부)
         if (req != null && req.password() != null) {
             String pw = req.password().trim();
             if (pw.length() < 6) throw new IllegalArgumentException("PASSWORD_TOO_SHORT");
             eu.setPasswordHash(passwordEncoder.encode(pw));
             eu.setPasswordAlgo("bcrypt");
         }
-
         eu.setUpdatedAt(LocalDateTime.now());
         endUserRepo.save(eu);
     }
@@ -238,10 +282,8 @@ public class StudentAdminService {
     @Transactional
     public void updateMemo(Long memoId, String content, Boolean pinned) {
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
-
         StudentMemo memo = memoRepo.findById(memoId).orElseThrow();
         boolean changed = false;
-
         if (content != null) {
             memo.setContent(content.trim());
             changed = true;
@@ -250,7 +292,6 @@ public class StudentAdminService {
             memo.setPinned(pinned);
             changed = true;
         }
-
         if (changed) {
             memo.setUpdatedAt(LocalDateTime.now());
             memo.setUpdatedBy(AppUserContext.getUserId());
@@ -264,74 +305,142 @@ public class StudentAdminService {
         memoRepo.deleteById(memoId);
     }
 
+    // =====================================================================
+    // ✅ [신규] 형제/자매 관리 로직
+    // =====================================================================
+
+    /**
+     * 특정 학생에 연결된 모든 형제/자매의 DTO 목록을 반환합니다.
+     * @param studentId 기준 학생 ID
+     * @return List<SiblingLinkDto> (상대방 학생 정보)
+     */
+    @Transactional(readOnly = true)
+    public List<SiblingLinkDto> listSiblings(Long studentId) {
+        // studentId가 low_id인 경우 (high_id 학생 조회)
+        List<SiblingLinkDto> list1 = siblingRepo.findSiblingsAsLow(studentId);
+        // studentId가 high_id인 경우 (low_id 학생 조회)
+        List<SiblingLinkDto> list2 = siblingRepo.findSiblingsAsHigh(studentId);
+
+        // 두 리스트를 합쳐서 반환
+        return Stream.concat(list1.stream(), list2.stream())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 두 학생을 형제/자매로 연결합니다.
+     * @param studentId1 기준 학생 ID (현재 보고 있는 학생)
+     * @param req 연결할 상대방 학생 ID DTO
+     * @return 생성된 student_sibling.id
+     */
+    @Transactional
+    public Long linkSibling(Long studentId1, SiblingCreateRequest req) {
+        dbVars.setAppVars(AppUserContext.getUserId(), "Link Sibling");
+
+        Long studentId2 = req.getStudentId2();
+        if (studentId1 == null || studentId2 == null) {
+            throw new ResponseStatusException(BAD_REQUEST, "학생 ID는 필수입니다.");
+        }
+        if (studentId1.equals(studentId2)) {
+            throw new ResponseStatusException(BAD_REQUEST, "동일한 학생을 형제로 연결할 수 없습니다.");
+        }
+
+        // DB 트리거가 (low_id, high_id) Unique 제약을 처리해주므로,
+        // 서비스 레이어에서는 student_id_1, student_id_2만 세팅합니다.
+        StudentSibling sibling = StudentSibling.builder()
+                .studentId1(studentId1)
+                .studentId2(studentId2)
+                .relationNote(req.getRelationNote())
+                .build();
+
+        try {
+            StudentSibling saved = siblingRepo.save(sibling);
+            return saved.getId();
+        } catch (Exception e) {
+            // (참고) DDL의 UNIQUE KEY(uk_sibling_pair) 제약으로 인해
+            // 이미 연결된 경우 DataIntegrityViolationException이 발생할 수 있습니다.
+            throw new ResponseStatusException(CONFLICT, "이미 형제로 연결된 관계입니다.", e);
+        }
+    }
+
+    /**
+     * 형제/자매 연결을 해제합니다.
+     * @param linkId student_sibling.id (연결 ID)
+     */
+    @Transactional
+    public void unlinkSibling(Long linkId) {
+        dbVars.setAppVars(AppUserContext.getUserId(), "Unlink Sibling");
+        if (!siblingRepo.existsById(linkId)) {
+            return; //
+        }
+        siblingRepo.deleteById(linkId);
+    }
+
+
     /* ================= 매핑/유틸 ================= */
 
-    /** 학생에 대응하는 EndUser가 없으면 새로 만든 뒤 매핑까지 보장 */
+    /**
+     * ✅ [오류 수정] 'effectively final' 오류를 피하기 위해 로직 수정
+     * - Optional을 사용하여 람다 내부에서 map 변수를 참조하지 않도록 변경
+     */
     private EndUser ensureEndUserForStudent(Long studentId){
-        EndUserStudentMap map = mapRepo.findByStudentId(studentId).orElse(null);
-        EndUser eu;
-        if (map == null) {
+        // 1.
+        Optional<EndUserStudentMap> mapOpt = mapRepo.findByStudentId(studentId);
+
+        if (mapOpt.isPresent()) {
+            // 2.
+            //
+            final EndUserStudentMap map = mapOpt.get();
+            return endUserRepo.findById(map.getUserId())
+                    .orElseThrow(() -> new IllegalStateException("EndUserStudentMap : " + map.getUserId()));
+        } else {
+            // 3.
             LocalDateTime now = LocalDateTime.now();
-            eu = EndUser.builder()
+            EndUser eu = EndUser.builder()
                     .userType("STUDENT")
                     .status("ACTIVE")
                     .marketingOptIn(false)
                     .createdAt(now).updatedAt(now)
                     .build();
-            eu = endUserRepo.save(eu);
-
-            map = EndUserStudentMap.builder()
-                    .userId(eu.getId())
-                    .studentId(studentId)
+            EndUser savedUser = endUserRepo.save(eu);
+            Student studentRef = repo.getReferenceById(studentId);
+            EndUserStudentMap newMap = EndUserStudentMap.builder()
+                    .userId(savedUser.getId())
+                    .user(savedUser)
+                    .student(studentRef)
                     .build();
-            mapRepo.save(map);
-        } else {
-            eu = endUserRepo.findById(map.getUserId()).orElseThrow();
+            mapRepo.save(newMap);
+            return savedUser;
         }
-        return eu;
     }
 
     /** DTO 매핑 — schoolName, photoUrl, 최신 메모 1건 반영 + ✅ 메타 주입 */
     private StudentSummary toSummary(Student s) {
         AttachFile f = s.getProfileImage();
-
-        // 파일 경로 정규화
         String relPath = null;
         if (f != null) {
             if (hasText(f.getRelativePath())) relPath = normalizeSlash(f.getRelativePath());
             else if (hasText(f.getDirectory()) && hasText(f.getSavedName()))
                 relPath = normalizeSlash(f.getDirectory() + "/" + f.getSavedName());
         }
-
-        // 퍼블릭 URL 구성
         String storedForUrl = null;
         if (f != null) {
             if (hasText(f.getAbsolutePath())) storedForUrl = f.getAbsolutePath();
             else if (hasText(relPath))        storedForUrl = relPath;
         }
         String publicUrl = (storedForUrl != null ? publicUrlHelper.toPublicUrl(storedForUrl) : null);
-
-        // 로그인아이디 로딩
         Long userId = null;
         String loginId = null;
-        EndUserStudentMap map = mapRepo.findByStudentId(s.getId()).orElse(null);
-        if (map != null) {
-            userId = map.getUserId();
-            loginId = endUserRepo.findById(userId).map(EndUser::getLoginId).orElse(null);
+        if (s.getEndUserMap() != null && s.getEndUserMap().getUser() != null) {
+            userId = s.getEndUserMap().getUserId();
+            loginId = s.getEndUserMap().getUser().getLoginId();
         }
-
-        // 학교명 resolve
         String schoolName = null;
         if (s.getSchoolId()!=null) {
             schoolName = schoolRepo.findNameById(s.getSchoolId()).orElse(null);
         }
-
-        // 최신 메모 1건 조회(고정>최신순)
         String latestMemo = memoRepo.findTopByStudent_IdOrderByPinnedDescCreatedAtDesc(s.getId())
                 .map(StudentMemo::getContent)
                 .orElse(null);
-
-        // 1차 DTO
         StudentSummary dto = StudentSummary.builder()
                 .id(s.getId())
                 .userId(userId)
@@ -341,6 +450,7 @@ public class StudentAdminService {
                 .status(s.getStatus())
                 .name(s.getName())
                 .birthdate(s.getBirthdate())
+                .gender(s.getGender()) // ✅ [신규]
                 .schoolId(s.getSchoolId())
                 .schoolName(schoolName)
                 .gradeLabel(s.getGradeLabel())
@@ -358,48 +468,32 @@ public class StudentAdminService {
                 .photoUrl(publicUrl)
                 .memo(latestMemo)
                 .build();
-
-        // ✅ 메타 보강 (student_hist → admin_user_info.user_name)
-        enrichMeta(dto, s);
-
+        enrichMeta(dto, s.getId());
         return dto;
     }
 
-    /** 최초/최신 히스토리 기반으로 메타 필드 채우기 */
-    private void enrichMeta(StudentSummary dto, Student s) {
-        StudentHist first = histRepo.findFirstByRefIdOrderByVersionAsc(s.getId()).orElse(null);
-        StudentHist last  = histRepo.findFirstByRefIdOrderByVersionDesc(s.getId()).orElse(null);
+    /** /  */
+    private void enrichMeta(StudentSummary dto, Long studentId) {
+        StudentHist first = histRepo.findFirstByRefIdOrderByVersionAsc(studentId).orElse(null);
+        StudentHist last  = histRepo.findFirstByRefIdOrderByVersionDesc(studentId).orElse(null);
 
-        // 최초 메타
         if (first != null) {
             dto.setCreatedAt(first.getEventAt() != null ? TS.format(first.getEventAt()) : null);
             String name = (first.getEventBy() != null)
                     ? adminUserRepo.findUserNameById(first.getEventBy()).orElse(null)
                     : null;
             dto.setCreatedByName(name);
-        } else {
-            // 히스토리가 없다면 student.created_at로 폴백
-            dto.setCreatedAt(s.getCreatedAt() != null ? TS.format(s.getCreatedAt()) : null);
-            // createdByName은 알 수 없으면 null
         }
-
-        // 최신 메타
         if (last != null) {
             dto.setUpdatedAt(last.getEventAt() != null ? TS.format(last.getEventAt()) : null);
             String name = (last.getEventBy() != null)
                     ? adminUserRepo.findUserNameById(last.getEventBy()).orElse(null)
                     : null;
             dto.setUpdatedByName(name);
-        } else {
-            dto.setUpdatedAt(s.getUpdatedAt() != null ? TS.format(s.getUpdatedAt()) : null);
-            String name = (s.getUpdatedBy() != null)
-                    ? adminUserRepo.findUserNameById(s.getUpdatedBy()).orElse(null)
-                    : null;
-            dto.setUpdatedByName(name);
         }
     }
 
-    /* ======= 공통 ======= */
+    /* =======  ======= */
     private static String emptyToNull(String s){ return (s==null||s.isBlank())?null:s; }
     private static boolean hasText(String s){ return s!=null && !s.trim().isEmpty(); }
     private static String normalizeSlash(String p){ return p.replace('\\','/'); }
