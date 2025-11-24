@@ -12,7 +12,8 @@ import java.util.List;
 public interface StudentSiblingRepository extends JpaRepository<StudentSibling, Long> {
 
     /**
-     * studentId가 high_id에 있는 경우, low_id에 연결된 '동생' 학생의 정보를 조회합니다.
+     * Case 1: 내 ID(studentId)가 High 쪽에 있을 때
+     * -> Low 쪽에 있는 학생(동생/작은ID)의 정보를 조회합니다.
      */
     @Query("""
         select new com.wino.academyapi.domain.student.dto.StudentSiblingDtos$SiblingLinkDto(
@@ -32,7 +33,8 @@ public interface StudentSiblingRepository extends JpaRepository<StudentSibling, 
     List<SiblingLinkDto> findSiblingsAsHigh(@Param("studentId") Long studentId);
 
     /**
-     * studentId가 low_id에 있는 경우, high_id에 연결된 '형' 학생의 정보를 조회합니다.
+     * Case 2: 내 ID(studentId)가 Low 쪽에 있을 때
+     * -> High 쪽에 있는 학생(형/누나/큰ID)의 정보를 조회합니다.
      */
     @Query("""
         select new com.wino.academyapi.domain.student.dto.StudentSiblingDtos$SiblingLinkDto(

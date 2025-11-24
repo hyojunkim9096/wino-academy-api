@@ -43,6 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             final String uri = req.getRequestURI();
 
+            // 공개 경로는 필터 통과
             if (isPublic(req.getMethod(), uri)) {
                 chain.doFilter(req, res);
                 return;
@@ -53,7 +54,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Claims claims = jwtProvider.getClaims(token);
                 String sid = claims.get(JwtProvider.CLAIM_SID, String.class);
 
-                if (sid != null) sessionService.requireActive(sid);
+                // ✅ [수정] 세션 상태 검증 로직 보강
+                if (sid != null) {
+                    SessionService.SessionState state = sessionService.requireActiveState(sid);
+                    if (state == SessionService.SessionState.REVOKED) {
+                        throw new IllegalStateException("다른 기기에서 로그인되어 로그아웃되었습니다.");
+                    } else if (state == SessionService.SessionState.EXPIRED) {
+                        throw new IllegalStateException("세션이 만료되었습니다. 다시 로그인해주세요.");
+                    } else if (state == SessionService.SessionState.NOT_FOUND) {
+                        // 세션 정보를 찾을 수 없는 경우 (서버 재시작 등), 만료된 것으로 취급하거나 그냥 통과시킬지 정책 결정 필요.
+                        // 여기서는 보안을 위해 재로그인 유도로 처리.
+                        throw new IllegalStateException("세션 정보가 유효하지 않습니다. 다시 로그인해주세요.");
+                    }
+                    // ACTIVE 상태면 통과
+                }
 
                 String role = claims.get(JwtProvider.AUTHORIZATION_KEY, String.class);
                 List<SimpleGrantedAuthority> authorities =
@@ -69,6 +83,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             chain.doFilter(req, res);
 
         } catch (IllegalStateException ex) {
+            // 423: 잠김, 중복 로그인 해지 등 비즈니스적 차단
+            // 401: 만료, 미인증 등
+            // 여기서는 메시지 구분을 위해 상태 코드를 분리하거나, 프론트 약속에 따라 401/423 중 선택
+            // 기존 로직 유지 (423 LOCKED_OR_INVALID_STATE)
             writeJson(res, 423, "LOCKED_OR_INVALID_STATE", ex.getMessage());
         } catch (Exception ex) {
             writeJson(res, 401, "UNAUTHORIZED", "인증에 실패했습니다.");

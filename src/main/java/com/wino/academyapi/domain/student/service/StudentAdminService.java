@@ -1,68 +1,62 @@
 // src/main/java/com/wino/academyapi/domain/student/service/StudentAdminService.java
 package com.wino.academyapi.domain.student.service;
 
+import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
+import com.wino.academyapi.domain.enduser.entity.EndUser;
+import com.wino.academyapi.domain.enduser.entity.EndUserStudentMap;
+import com.wino.academyapi.domain.enduser.repository.EndUserStudentMapRepository;
+import com.wino.academyapi.domain.enduser.repository.EndUserRepository;
 import com.wino.academyapi.domain.file.entity.AttachFile;
+import com.wino.academyapi.domain.file.repository.AttachFileRepository;
+import com.wino.academyapi.domain.school.repository.SchoolRepository;
 import com.wino.academyapi.domain.student.dto.StudentDtos.*;
-// ✅ [신규] Sibling DTO import
-import com.wino.academyapi.domain.student.dto.StudentSiblingDtos.*;
+import com.wino.academyapi.domain.student.dto.StudentSiblingDtos.SiblingCreateRequest;
+import com.wino.academyapi.domain.student.dto.StudentSiblingDtos.SiblingLinkDto;
 import com.wino.academyapi.domain.student.entity.Student;
-// ✅ [신규] Sibling 엔티티/리포지토리 import
+import com.wino.academyapi.domain.student.entity.StudentHist;
 import com.wino.academyapi.domain.student.entity.StudentSibling;
-import com.wino.academyapi.domain.student.repository.StudentSiblingRepository;
+import com.wino.academyapi.domain.student.memo.entity.StudentMemo;
+import com.wino.academyapi.domain.student.memo.repository.StudentMemoRepository;
+import com.wino.academyapi.domain.student.repository.StudentHistRepository;
 import com.wino.academyapi.domain.student.repository.StudentRepository;
+import com.wino.academyapi.domain.student.repository.StudentSiblingRepository;
 import com.wino.academyapi.global.audit.AppUserContext;
 import com.wino.academyapi.global.file.PublicUrlHelper;
 import com.wino.academyapi.global.storage.LocalFileStorageService;
 import com.wino.academyapi.infra.db.DbSessionVars;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Optional;
-// ✅ [오류 수정] Collectors, Stream, List import
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/* ✅ enduser 패키지 의존 */
-import com.wino.academyapi.domain.enduser.entity.EndUser;
-import com.wino.academyapi.domain.enduser.entity.EndUserStudentMap;
-import com.wino.academyapi.domain.enduser.repository.EndUserRepository;
-import com.wino.academyapi.domain.enduser.repository.EndUserStudentMapRepository;
-// ✅ [오류 수정] AttachFileRepository import
-import com.wino.academyapi.domain.file.repository.AttachFileRepository;
-
-/* ✅ 학교명 resolve */
-import com.wino.academyapi.domain.school.repository.SchoolRepository;
-
-/* ✅ 학생 메모 */
-import com.wino.academyapi.domain.student.memo.entity.StudentMemo;
-import com.wino.academyapi.domain.student.memo.repository.StudentMemoRepository;
-
-/* ✅ 메타 정보(히스토리 + 작성자명) */
-import com.wino.academyapi.domain.student.entity.StudentHist;
-import com.wino.academyapi.domain.student.repository.StudentHistRepository;
-import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
-
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.CONFLICT;
-import static org.springframework.http.HttpStatus.BAD_REQUEST; // ✅
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 @RequiredArgsConstructor
 public class StudentAdminService {
 
     private final StudentRepository repo;
-    private final LocalFileStorageService storage; //
+    private final LocalFileStorageService storage;
     private final PublicUrlHelper publicUrlHelper;
     private final DbSessionVars dbVars;
 
-    // ✅ [오류 수정] AttachFileRepository 주입 (storage가 아님)
+    // ✅ FileRepository 직접 주입 (storage 서비스와 역할 분리)
     private final AttachFileRepository fileRepo;
 
     /* enduser */
@@ -76,7 +70,7 @@ public class StudentAdminService {
     /* 학생 메모 */
     private final StudentMemoRepository memoRepo;
 
-    // ✅ [신규] 형제 리포지토리 주입
+    // ✅ 형제 리포지토리 주입
     private final StudentSiblingRepository siblingRepo;
 
     /* 메타(히스토리 + 작성자명) */
@@ -95,16 +89,15 @@ public class StudentAdminService {
         String wl  = emptyToNull(workLocation);
         String kw  = emptyToNull(keyword);
 
-        // ✅ [수정] N+1이 해결된 DTO 프로젝션 쿼리 사용
+        // ✅ N+1이 해결된 DTO 프로젝션 쿼리 사용
         Page<StudentSummary> summaryPage = repo.searchWithSummary(stg, wl, kw, pageable);
 
-        // ✅ [수정] DTO 프로젝션이 채우지 못한 메타정보(createdAt/By)와 사진URL(photoUrl)을 채웁니다.
+        // 메타정보(createdAt/By)와 사진URL(photoUrl) 후처리
         summaryPage.getContent().forEach(dto -> {
             // (1) 메타 정보 주입
             enrichMeta(dto, dto.getId());
             // (2) 사진 URL 주입
             if (dto.getProfileImageId() != null) {
-                // ✅ [오류 수정] storage.findFileById -> fileRepo.findById
                 AttachFile f = fileRepo.findById(dto.getProfileImageId()).orElse(null);
                 if (f != null) {
                     String relPath = null;
@@ -143,9 +136,9 @@ public class StudentAdminService {
                 .status(p.getStatus() == null || p.getStatus().isBlank() ? "PENDING" : p.getStatus())
                 .name(p.getName())
                 .birthdate(p.getBirthdate())
-                .gender(p.getGender()) // ✅ [신규]
+                .gender(p.getGender())
                 .schoolId(p.getSchoolId())
-                .gradeLabel(p.getGradeLabel()) //
+                .gradeLabel(p.getGradeLabel())
                 .phone(p.getPhone())
                 .email(p.getEmail())
                 .preferSms(p.isPreferSms())
@@ -158,10 +151,9 @@ public class StudentAdminService {
                 .build();
         s = repo.save(s);
 
-        //
         if (hasText(p.getMemo())) {
             StudentMemo sm = StudentMemo.builder()
-                    .student(s) //
+                    .student(s)
                     .content(p.getMemo().trim())
                     .pinned(false)
                     .createdAt(LocalDateTime.now())
@@ -176,17 +168,15 @@ public class StudentAdminService {
 
     @Transactional
     public void update(Long id, StudentUpdateRequest p) {
-        // 🔐 세션 변수 주입 (히스토리 트리거가 @app_user_id 사용)
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
-        Student s = repo.findById(id).orElseThrow();
+        Student s = repo.findById(id).orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
 
-        //
         if (p.getWorkLocationCode()!=null) s.setWorkLocationCode(p.getWorkLocationCode());
         if (p.getSchoolStage()!=null)      s.setSchoolStage(p.getSchoolStage());
         if (p.getStatus()!=null)           s.setStatus(p.getStatus());
         if (p.getName()!=null)             s.setName(p.getName());
         if (p.getBirthdate()!=null)        s.setBirthdate(p.getBirthdate());
-        if (p.getGender()!=null)           s.setGender(p.getGender()); // ✅ [신규]
+        if (p.getGender()!=null)           s.setGender(p.getGender());
         if (p.getSchoolId()!=null)         s.setSchoolId(p.getSchoolId());
         if (p.getGradeLabel()!=null)       s.setGradeLabel(p.getGradeLabel());
         if (p.getPhone()!=null)            s.setPhone(p.getPhone());
@@ -199,7 +189,6 @@ public class StudentAdminService {
         if (p.getAddress()!=null)          s.setAddress(p.getAddress());
         if (p.getDetailAddress()!=null)    s.setDetailAddress(p.getDetailAddress());
 
-        // 🔁
         if (p.getMemo()!=null && hasText(p.getMemo())) {
             StudentMemo sm = StudentMemo.builder()
                     .student(s)
@@ -213,7 +202,6 @@ public class StudentAdminService {
             memoRepo.save(sm);
         }
 
-        //
         if (s.isPreferSms() && !hasText(s.getPhone()))   s.setPreferSms(false);
         if (s.isPreferEmail() && !hasText(s.getEmail())) s.setPreferEmail(false);
         if (s.getStatus() == null || s.getStatus().isBlank()) s.setStatus("ACTIVE");
@@ -222,16 +210,14 @@ public class StudentAdminService {
     @Transactional
     public void delete(Long id) {
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
-        //
         mapRepo.deleteByStudentId(id);
-        // student_memo
         repo.deleteById(id);
     }
 
     @Transactional
     public Long uploadProfile(Long id, MultipartFile file) throws IOException {
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
-        Student s = repo.findById(id).orElseThrow();
+        Student s = repo.findById(id).orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
         AttachFile saved = storage.saveProfileImage(file);
         s.setProfileImage(saved);
         return saved.getId();
@@ -306,31 +292,26 @@ public class StudentAdminService {
     }
 
     // =====================================================================
-    // ✅ [신규] 형제/자매 관리 로직
+    // ✅ 형제/자매 관리 로직
     // =====================================================================
 
     /**
      * 특정 학생에 연결된 모든 형제/자매의 DTO 목록을 반환합니다.
-     * @param studentId 기준 학생 ID
-     * @return List<SiblingLinkDto> (상대방 학생 정보)
      */
     @Transactional(readOnly = true)
     public List<SiblingLinkDto> listSiblings(Long studentId) {
-        // studentId가 low_id인 경우 (high_id 학생 조회)
+        // 1. 내가 Low일 때 (상대방 High 조회)
         List<SiblingLinkDto> list1 = siblingRepo.findSiblingsAsLow(studentId);
-        // studentId가 high_id인 경우 (low_id 학생 조회)
+        // 2. 내가 High일 때 (상대방 Low 조회)
         List<SiblingLinkDto> list2 = siblingRepo.findSiblingsAsHigh(studentId);
 
-        // 두 리스트를 합쳐서 반환
+        // 3. 병합
         return Stream.concat(list1.stream(), list2.stream())
                 .collect(Collectors.toList());
     }
 
     /**
      * 두 학생을 형제/자매로 연결합니다.
-     * @param studentId1 기준 학생 ID (현재 보고 있는 학생)
-     * @param req 연결할 상대방 학생 ID DTO
-     * @return 생성된 student_sibling.id
      */
     @Transactional
     public Long linkSibling(Long studentId1, SiblingCreateRequest req) {
@@ -356,21 +337,18 @@ public class StudentAdminService {
             StudentSibling saved = siblingRepo.save(sibling);
             return saved.getId();
         } catch (Exception e) {
-            // (참고) DDL의 UNIQUE KEY(uk_sibling_pair) 제약으로 인해
-            // 이미 연결된 경우 DataIntegrityViolationException이 발생할 수 있습니다.
             throw new ResponseStatusException(CONFLICT, "이미 형제로 연결된 관계입니다.", e);
         }
     }
 
     /**
      * 형제/자매 연결을 해제합니다.
-     * @param linkId student_sibling.id (연결 ID)
      */
     @Transactional
     public void unlinkSibling(Long linkId) {
         dbVars.setAppVars(AppUserContext.getUserId(), "Unlink Sibling");
         if (!siblingRepo.existsById(linkId)) {
-            return; //
+            return;
         }
         siblingRepo.deleteById(linkId);
     }
@@ -379,55 +357,65 @@ public class StudentAdminService {
     /* ================= 매핑/유틸 ================= */
 
     /**
-     * ✅ [오류 수정] 'effectively final' 오류를 피하기 위해 로직 수정
-     * - Optional을 사용하여 람다 내부에서 map 변수를 참조하지 않도록 변경
+     * ✅ [수정] 학생 계정(EndUser) 확보 로직 개선 (ObjectOptimisticLockingFailureException 방지)
+     * - 이미 매핑이 있으면 그 유저 반환
+     * - 없으면 새 EndUser 생성 후 매핑 테이블에 'INSERT'
+     * - saveAndFlush() 사용하여 즉시 DB 반영
      */
-    private EndUser ensureEndUserForStudent(Long studentId){
-        // 1.
+    private EndUser ensureEndUserForStudent(Long studentId) {
+        // 1. 매핑 존재 여부 확인
         Optional<EndUserStudentMap> mapOpt = mapRepo.findByStudentId(studentId);
 
         if (mapOpt.isPresent()) {
-            // 2.
-            //
-            final EndUserStudentMap map = mapOpt.get();
-            return endUserRepo.findById(map.getUserId())
-                    .orElseThrow(() -> new IllegalStateException("EndUserStudentMap : " + map.getUserId()));
-        } else {
-            // 3.
-            LocalDateTime now = LocalDateTime.now();
-            EndUser eu = EndUser.builder()
-                    .userType("STUDENT")
-                    .status("ACTIVE")
-                    .marketingOptIn(false)
-                    .createdAt(now).updatedAt(now)
-                    .build();
-            EndUser savedUser = endUserRepo.save(eu);
-            Student studentRef = repo.getReferenceById(studentId);
-            EndUserStudentMap newMap = EndUserStudentMap.builder()
-                    .userId(savedUser.getId())
-                    .user(savedUser)
-                    .student(studentRef)
-                    .build();
-            mapRepo.save(newMap);
-            return savedUser;
+            // 이미 계정이 존재하면 해당 계정 반환
+            Long userId = mapOpt.get().getUserId();
+            return endUserRepo.findById(userId)
+                    .orElseThrow(() -> new IllegalStateException("EndUserStudentMap mismatch: user " + userId + " not found"));
         }
+
+        // 2. 계정이 없으면 새로 생성
+        LocalDateTime now = LocalDateTime.now();
+
+        // 2-1. EndUser 생성 (먼저 저장해서 ID 확보)
+        EndUser eu = EndUser.builder()
+                .userType("STUDENT")
+                .status("ACTIVE")
+                .marketingOptIn(false)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        EndUser savedUser = endUserRepo.saveAndFlush(eu); // ✅ 즉시 반영
+
+        // 2-2. Student 프록시 조회
+        Student studentRef = repo.getReferenceById(studentId);
+
+        // 2-3. 매핑 테이블 저장 (새로운 ID로 INSERT 보장)
+        EndUserStudentMap newMap = EndUserStudentMap.builder()
+                .user(savedUser)      // @MapsId에 의해 userId가 PK로 사용됨
+                .student(studentRef)
+                .build();
+
+        mapRepo.saveAndFlush(newMap); // ✅ 즉시 반영
+
+        return savedUser;
     }
 
-    /** DTO 매핑 — schoolName, photoUrl, 최신 메모 1건 반영 + ✅ 메타 주입 */
     private StudentSummary toSummary(Student s) {
         AttachFile f = s.getProfileImage();
         String relPath = null;
+        String publicUrl = null;
+        Long fileId = null;
+
         if (f != null) {
+            fileId = f.getId();
             if (hasText(f.getRelativePath())) relPath = normalizeSlash(f.getRelativePath());
-            else if (hasText(f.getDirectory()) && hasText(f.getSavedName()))
+            else if (hasText(f.getDirectory()) && hasText(f.getSavedName())) {
                 relPath = normalizeSlash(f.getDirectory() + "/" + f.getSavedName());
+            }
+            String stored = hasText(f.getAbsolutePath()) ? f.getAbsolutePath() : relPath;
+            publicUrl = publicUrlHelper.toPublicUrl(stored);
         }
-        String storedForUrl = null;
-        if (f != null) {
-            if (hasText(f.getAbsolutePath())) storedForUrl = f.getAbsolutePath();
-            else if (hasText(relPath))        storedForUrl = relPath;
-        }
-        String publicUrl = (storedForUrl != null ? publicUrlHelper.toPublicUrl(storedForUrl) : null);
+
         Long userId = null;
         String loginId = null;
         if (s.getEndUserMap() != null && s.getEndUserMap().getUser() != null) {
@@ -441,6 +429,7 @@ public class StudentAdminService {
         String latestMemo = memoRepo.findTopByStudent_IdOrderByPinnedDescCreatedAtDesc(s.getId())
                 .map(StudentMemo::getContent)
                 .orElse(null);
+
         StudentSummary dto = StudentSummary.builder()
                 .id(s.getId())
                 .userId(userId)
@@ -450,7 +439,7 @@ public class StudentAdminService {
                 .status(s.getStatus())
                 .name(s.getName())
                 .birthdate(s.getBirthdate())
-                .gender(s.getGender()) // ✅ [신규]
+                .gender(s.getGender())
                 .schoolId(s.getSchoolId())
                 .schoolName(schoolName)
                 .gradeLabel(s.getGradeLabel())
@@ -463,16 +452,16 @@ public class StudentAdminService {
                 .postalCode(s.getPostalCode())
                 .address(s.getAddress())
                 .detailAddress(s.getDetailAddress())
-                .profileImageId(f != null ? f.getId() : null)
+                .profileImageId(fileId)
                 .photoPath(relPath)
                 .photoUrl(publicUrl)
                 .memo(latestMemo)
                 .build();
+
         enrichMeta(dto, s.getId());
         return dto;
     }
 
-    /** /  */
     private void enrichMeta(StudentSummary dto, Long studentId) {
         StudentHist first = histRepo.findFirstByRefIdOrderByVersionAsc(studentId).orElse(null);
         StudentHist last  = histRepo.findFirstByRefIdOrderByVersionDesc(studentId).orElse(null);
@@ -493,7 +482,6 @@ public class StudentAdminService {
         }
     }
 
-    /* =======  ======= */
     private static String emptyToNull(String s){ return (s==null||s.isBlank())?null:s; }
     private static boolean hasText(String s){ return s!=null && !s.trim().isEmpty(); }
     private static String normalizeSlash(String p){ return p.replace('\\','/'); }

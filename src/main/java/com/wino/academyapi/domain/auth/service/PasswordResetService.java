@@ -19,12 +19,6 @@ import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.concurrent.ThreadLocalRandom;
 
-/**
- * 비밀번호 재설정 서비스 (압축본 엔티티/레포 시그니처와 1:1 매칭)
- * - issued_at NOT NULL: 코드 생성 시 issuedAt 반드시 세팅
- * - 비번재설정 성공시: 잠금 해제 + 실패횟수 초기화 (applyPasswordResetPolicyPreserveTemporary)
- * - ⛏ TTL(분)은 AppSetting(DB) → yml → 기본값(10) 순으로 적용: key = "password.reset.ttl.minutes"
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -34,59 +28,52 @@ public class PasswordResetService {
     private final PasswordResetCodeRepository codeRepository;
     private final MailService mailService;
     private final PasswordEncoder passwordEncoder;
-    private final AppSettingService settingService;
+    private final AppSettingService appSettingService;
 
-    /** 현재 비밀번호 재설정 코드 TTL(분)을 설정에서 조회 */
-    private int ttlMinutes() {
-        // 음수/0 같은 비정상값을 막기 위해 최소 1분 보장
-        int v = settingService.getFirstIntProfileAware(new String[]{"password.reset.ttl.minutes"}, 10);
-        return Math.max(1, v);
-    }
-
-    /** 인증코드 요청 */
+    /** 인증코드 발급 & 메일 전송 */
     @Transactional
     public void requestCode(String userId) {
-        // 1) 사용자 검증
         AdminUser user = userRepository.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
 
-        // 2) 6자리 숫자 코드 생성 + 해시화
+        if (user.getEmail() == null || user.getEmail().isBlank()) {
+            throw new IllegalArgumentException("등록된 이메일이 없습니다. 관리자에게 문의하세요.");
+        }
+
+        // 1. 코드 생성 (6자리 숫자)
         String code = randomDigits(6);
-        String codeHash = sha256Hex(code);
+        String hash = sha256Hex(code);
 
-        // 3) 기존 코드 제거(단순 정책)
-        codeRepository.deleteByUserId(userId);
+        // 2. 만료 시간 (설정값 or 기본 10분)
+        int ttl = appSettingService.getInt("password.reset.code-ttl-minutes", 10);
+        LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(ttl);
 
-        // 4) 코드 저장 (issuedAt 필수, expiresAt = now + TTL)
-        LocalDateTime now = LocalDateTime.now();
-        int ttl = ttlMinutes();
+        // 3. DB 저장
         PasswordResetCode prc = PasswordResetCode.builder()
                 .userId(userId)
-                .codeHash(codeHash)
-                .issuedAt(now)                      // NOT NULL
-                .expiresAt(now.plusMinutes(ttl))    // 설정 기반 TTL
+                .codeHash(hash)
+                .issuedAt(LocalDateTime.now())
+                .expiresAt(expiresAt)
                 .used(false)
                 .build();
-
         codeRepository.save(prc);
 
-        // 5) 메일 발송 (본문에 실제 TTL 반영)
-        mailService.sendPlain(
-                user.getEmail(),
-                "[WINO] 비밀번호 재설정 코드",
-                "인증 코드는 " + code + " 입니다. " + ttl + "분 내에 입력해 주세요."
-        );
+        // 4. 메일 발송
+        String subject = "[WINO Academy] 비밀번호 재설정 인증코드";
+        String body = "인증코드: " + code + "\n\n" + ttl + "분 내에 입력해주세요.";
+        mailService.sendPlain(user.getEmail(), subject, body);
     }
 
-    /** 코드 확인 + 비밀번호 변경 */
+    /** 비밀번호 재설정 실행 */
     @Transactional
     public void resetPassword(String userId, String code, String newRawPassword) {
-        // 최신 코드
+        // 1. 최신 인증코드 조회
         PasswordResetCode prc = codeRepository.findTopByUserIdOrderByIssuedAtDesc(userId)
-                .orElseThrow(() -> new IllegalArgumentException("재설정 요청이 없습니다."));
+                .orElseThrow(() -> new IllegalArgumentException("재설정 요청 내역이 없습니다."));
 
+        // 2. 유효성 검증
         if (prc.isExpired()) {
-            throw new IllegalArgumentException("인증 코드가 만료되었습니다.");
+            throw new IllegalArgumentException("인증 코드가 만료되었습니다. 다시 요청해주세요.");
         }
         if (prc.isUsed()) {
             throw new IllegalArgumentException("이미 사용된 인증 코드입니다.");
@@ -95,25 +82,31 @@ public class PasswordResetService {
             throw new IllegalArgumentException("인증 코드가 올바르지 않습니다.");
         }
 
+        // 3. 사용자 조회 및 비밀번호 변경
         AdminUser user = userRepository.findByUserId(userId)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 사용자입니다."));
 
-        // 비밀번호 변경
+        if (newRawPassword == null || newRawPassword.length() < 6) {
+            throw new IllegalArgumentException("새 비밀번호는 6자리 이상이어야 합니다.");
+        }
+
         user.setPassword(passwordEncoder.encode(newRawPassword));
 
-        // 비번 재설정 정책 적용: 실패횟수/락 초기화, LOCKED → ACTIVE
+        // 정책 적용: 잠금 해제, 실패 카운트 초기화
         user.applyPasswordResetPolicyPreserveTemporary();
         userRepository.save(user);
 
-        // 인증 코드 사용 처리
+        // 4. 코드 사용 처리 (✅ 수정됨)
         prc.markUsed();
-        codeRepository.save(prc); // 명시적 저장
+        codeRepository.save(prc);
+
+        log.info("Password reset success for user: {}", userId);
     }
 
     // ---- 내부 유틸 ----
     private static String randomDigits(int digits) {
         int bound = (int) Math.pow(10, digits);
-        int n = ThreadLocalRandom.current().nextInt(bound); // 0 ~ 10^digits-1
+        int n = ThreadLocalRandom.current().nextInt(bound);
         return String.format("%0" + digits + "d", n);
     }
 
@@ -123,7 +116,7 @@ public class PasswordResetService {
             byte[] digest = md.digest(value.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
         } catch (Exception e) {
-            throw new IllegalStateException("해시 계산 실패", e);
+            throw new RuntimeException("Hash fail", e);
         }
     }
 }

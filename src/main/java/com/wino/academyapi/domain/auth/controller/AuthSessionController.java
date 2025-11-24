@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/auth/controller/AuthSessionController.java
 package com.wino.academyapi.domain.auth.controller;
 
 import com.wino.academyapi.domain.admin.staff.entity.AdminUser;
@@ -41,7 +42,7 @@ public class AuthSessionController {
 
         long remaining = 0L;
         if (sid != null && !sid.isBlank()) {
-            // 세션이 비정상이어도 예외 대신 0 처리
+            // 세션이 비정상이어도 예외 대신 0 처리 (서비스에 해당 메서드 추가됨)
             remaining = sessionService.remainingSeconds(sid);
         }
         LocalDateTime exp = LocalDateTime.now().plusSeconds(Math.max(0, remaining));

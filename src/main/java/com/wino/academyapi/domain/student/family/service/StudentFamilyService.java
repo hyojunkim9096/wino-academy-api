@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/student/family/service/StudentFamilyService.java
 package com.wino.academyapi.domain.student.family.service;
 
 import com.wino.academyapi.domain.guardian.entity.Guardian;
@@ -33,11 +34,13 @@ public class StudentFamilyService {
 
     /* ===== 조회 ===== */
 
+    /** 학생 기준 보호자 목록 */
     @Transactional(readOnly = true)
     public List<GuardianLinkSummary> listGuardiansByStudent(Long studentId) {
         return repo.findGuardianSummariesByStudent(studentId);
     }
 
+    /** 보호자 기준 학생 목록 */
     @Transactional(readOnly = true)
     public List<StudentLinkSummary> listStudentsByGuardian(Long guardianId) {
         return repo.findStudentSummariesByGuardian(guardianId);
@@ -55,7 +58,9 @@ public class StudentFamilyService {
 
         // (student, guardian) 유니크 보호
         repo.findByStudent_IdAndGuardian_Id(p.getStudentId(), p.getGuardianId())
-                .ifPresent(l -> { throw new IllegalStateException("이미 연결된 학생-보호자입니다."); });
+                .ifPresent(l -> {
+                    throw new IllegalStateException("이미 연결된 학생-보호자입니다.");
+                });
 
         Student s = studentRepo.findById(p.getStudentId()).orElseThrow();
         Guardian g = guardianRepo.findById(p.getGuardianId()).orElseThrow();
@@ -78,13 +83,14 @@ public class StudentFamilyService {
     @Transactional
     public void updateLink(Long linkId, LinkUpdateRequest p) {
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
+
         StudentGuardianLink l = repo.findById(linkId).orElseThrow();
 
-        if (p.getRelationCode()!=null)   l.setRelationCode(p.getRelationCode());
-        if (p.getPrimary()!=null)        l.setPrimary(p.getPrimary());
-        if (p.getLegalGuardian()!=null)  l.setLegalGuardian(p.getLegalGuardian());
-        if (p.getReceiveNotice()!=null)  l.setReceiveNotice(p.getReceiveNotice());
-        if (p.getReceiveBilling()!=null) l.setReceiveBilling(p.getReceiveBilling());
+        if (p.getRelationCode() != null)   l.setRelationCode(p.getRelationCode());
+        if (p.getPrimary() != null)        l.setPrimary(p.getPrimary());
+        if (p.getLegalGuardian() != null)  l.setLegalGuardian(p.getLegalGuardian());
+        if (p.getReceiveNotice() != null)  l.setReceiveNotice(p.getReceiveNotice());
+        if (p.getReceiveBilling() != null) l.setReceiveBilling(p.getReceiveBilling());
         // JPA dirty checking으로 자동 반영
     }
 
