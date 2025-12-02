@@ -19,10 +19,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 // ✅ [리팩토링] 권한 확인을 위해 import
-import com.wino.academyapi.domain.admin.staff.entity.AdminUser;
-import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
-import com.wino.academyapi.domain.admin.team.entity.TeamMember;
-import com.wino.academyapi.domain.admin.team.repository.TeamMemberRepository;
+import com.wino.academyapi.domain.member.entity.AdminUser;
+import com.wino.academyapi.domain.member.repository.AdminUserRepository;
+import com.wino.academyapi.domain.member.entity.TeamMember;
+import com.wino.academyapi.domain.member.repository.TeamMemberRepository;
 
 import java.time.LocalDateTime;
 // ✅ [오류 수정] 누락된 import 3개 추가
@@ -32,7 +32,6 @@ import java.util.Set;
 // (기존)
 import java.util.List;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.FORBIDDEN;

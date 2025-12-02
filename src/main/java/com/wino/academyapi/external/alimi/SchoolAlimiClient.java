@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/external/alimi/SchoolAlimiClient.java
 package com.wino.academyapi.external.alimi;
 
 import com.wino.academyapi.domain.school.entity.SchoolStage;

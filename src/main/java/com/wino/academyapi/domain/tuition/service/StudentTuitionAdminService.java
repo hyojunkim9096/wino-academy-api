@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/tuition/service/StudentTuitionAdminService.java
 package com.wino.academyapi.domain.tuition.service;
 
 import com.wino.academyapi.domain.code.repository.CommonCodeRepository;

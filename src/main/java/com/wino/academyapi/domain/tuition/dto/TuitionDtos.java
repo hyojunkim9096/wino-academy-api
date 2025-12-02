@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/tuition/dto/TuitionDtos.java
 package com.wino.academyapi.domain.tuition.dto;
 
 import java.math.BigDecimal;

@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/semester/entity/SemesterType.java
 package com.wino.academyapi.domain.semester.entity;
 
 /**

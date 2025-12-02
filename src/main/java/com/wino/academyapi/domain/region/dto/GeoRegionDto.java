@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/region/dto/GeoRegionDto.java
 package com.wino.academyapi.domain.region.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;

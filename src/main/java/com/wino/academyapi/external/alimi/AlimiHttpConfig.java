@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/external/alimi/AlimiHttpConfig.java
 package com.wino.academyapi.external.alimi;
 
 import lombok.RequiredArgsConstructor;

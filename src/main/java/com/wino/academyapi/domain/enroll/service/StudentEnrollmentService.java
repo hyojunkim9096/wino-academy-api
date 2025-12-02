@@ -21,27 +21,27 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
-// ✅ MAIN 기본 타임슬롯 자동 연결을 위해 추가
-import com.wino.academyapi.domain.classs.repository.ClassTimeslotRepository;
+// ✅ 변경: MAIN 기본 타임슬롯 자동 연결을 위해 CourseTimeslotRepository import
+import com.wino.academyapi.domain.course.repository.CourseTimeslotRepository; // 구 ClassTimeslotRepository
 
 /**
  * 학생 반 배정 서비스
  *
  * ✅ 2025-10 DDL 반영 사항
- *  - roleCode → classStatusCode(MAIN/CROSS)로 용어/컬럼 정리
- *  - attendDays(csv) → attendDaysMask(INT, 비트마스크)
- *    · 마스크 값은 직접 세팅하지 않음. student_enroll_timeslot 매핑을 저장/갱신하면
- *      DB 트리거가 자동으로 student_class_enrollment.attend_days_mask 를 갱신함.
- *  - (옵션) timeslotIds 를 전달받으면 매핑(student_enroll_timeslot)을 생성/교체함
+ * - roleCode → classStatusCode(MAIN/CROSS)로 용어/컬럼 정리
+ * - attendDays(csv) → attendDaysMask(INT, 비트마스크)
+ * · 마스크 값은 직접 세팅하지 않음. student_enroll_timeslot 매핑을 저장/갱신하면
+ * DB 트리거가 자동으로 student_class_enrollment.attend_days_mask 를 갱신함.
+ * - (옵션) timeslotIds 를 전달받으면 매핑(student_enroll_timeslot)을 생성/교체함
  *
  * 주의:
- *  - 동일 학생·반 조합의 ACTIVE 배정 중복 금지(메인/교차 무관).
- *  - timeslot 유효성/기간/소속 반 검증은 DB 트리거에서 수행.
+ * - 동일 학생·반 조합의 ACTIVE 배정 중복 금지(메인/교차 무관).
+ * - timeslot 유효성/기간/소속 반 검증은 DB 트리거에서 수행.
  *
  * 구현 포인트:
- *  - 목록 조회는 확장 뷰(student_enrollment_ext_v)를 사용해 classStatusName/attendDaysLabel 을 포함합니다.
- *  - 컨트롤러 시그니처(Page 유지)를 위해 수동 페이징 수행(뷰 SQL 정렬 포함).
- *  - ✅ MAIN 배정 생성 시 timeslotIds 미전달이면 반의 "활성 기본 타임슬롯"을 자동 연결(운영 편의/집계 자동화).
+ * - 목록 조회는 확장 뷰(student_enrollment_ext_v)를 사용해 classStatusName/attendDaysLabel 을 포함합니다.
+ * - 컨트롤러 시그니처(Page 유지)를 위해 수동 페이징 수행(뷰 SQL 정렬 포함).
+ * - ✅ MAIN 배정 생성 시 timeslotIds 미전달이면 반의 "활성 기본 타임슬롯"을 자동 연결(운영 편의/집계 자동화).
  */
 @Service
 @RequiredArgsConstructor
@@ -55,8 +55,8 @@ public class StudentEnrollmentService {
     // ✅ 확장 뷰(라벨 포함) 리포지토리 — classStatusName / attendDaysLabel 제공
     private final EnrollmentExtViewRepository extRepo;
 
-    // ✅ 반의 활성 타임슬롯 조회용(기본 슬롯 자동 연결)
-    private final ClassTimeslotRepository classTimeslotRepo;
+    // ✅ 반의 활성 타임슬롯 조회용(기본 슬롯 자동 연결) - 리네이밍 적용
+    private final CourseTimeslotRepository courseTimeslotRepo; // 구 ClassTimeslotRepository
 
     /* ================= 조회 ================= */
 
@@ -141,7 +141,8 @@ public class StudentEnrollmentService {
             // 운영 정책:
             //  - class_subject.use_yn은 데이터 품질 문제가 있어 신뢰하지 않음
             //  - class_master.use_yn 및 class_timeslot.use_yn 만 신뢰(기존 충돌검사 쿼리와 동일 기준)
-            List<Long> defaultTsIds = classTimeslotRepo.findActiveTimeslotIdsByClassId(e.getClassId());
+            // ✅ 변경: classTimeslotRepo -> courseTimeslotRepo
+            List<Long> defaultTsIds = courseTimeslotRepo.findActiveTimeslotIdsByCourseId(e.getClassId()); // findActiveTimeslotIdsByClassId -> findActiveTimeslotIdsByCourseId (Repo 메서드명도 변경되었을 가정)
             if (defaultTsIds != null && !defaultTsIds.isEmpty()) {
                 replaceTimeslots(e.getId(), defaultTsIds); // 트리거가 요일 집계 수행
             }
@@ -252,7 +253,7 @@ public class StudentEnrollmentService {
      * - insert/삭제 시 트리거가 attend_days_mask 를 재계산
      *
      * ✅ 안전 보강:
-     *   - 중복/NULL/비양수(≤0) ID 제거 후 삽입 → UNIQUE (enroll_id,timeslot_id) 충돌 예방
+     * - 중복/NULL/비양수(≤0) ID 제거 후 삽입 → UNIQUE (enroll_id,timeslot_id) 충돌 예방
      */
     private void replaceTimeslots(Long enrollId, List<Long> timeslotIds) {
         // 전체 삭제 (치환 정책)

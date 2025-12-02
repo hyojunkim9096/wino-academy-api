@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/tuition/entity/StudentTuition.java
 package com.wino.academyapi.domain.tuition.entity;
 
 import jakarta.persistence.*;

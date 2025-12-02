@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/tuition/repository/TuitionPriceInfoRepository.java
 package com.wino.academyapi.domain.tuition.repository;
 
 import org.springframework.data.jpa.repository.Query;

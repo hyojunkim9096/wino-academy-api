@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/tuition/repository/projection/BillingCandidateRow.java
 package com.wino.academyapi.domain.tuition.repository.projection;
 
 import java.math.BigDecimal;

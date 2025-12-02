@@ -1,7 +1,7 @@
 // src/main/java/com/wino/academyapi/domain/student/service/StudentAdminService.java
 package com.wino.academyapi.domain.student.service;
 
-import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
+import com.wino.academyapi.domain.member.repository.AdminUserRepository;
 import com.wino.academyapi.domain.enduser.entity.EndUser;
 import com.wino.academyapi.domain.enduser.entity.EndUserStudentMap;
 import com.wino.academyapi.domain.enduser.repository.EndUserStudentMapRepository;
@@ -37,7 +37,6 @@ import org.springframework.web.server.ResponseStatusException;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;

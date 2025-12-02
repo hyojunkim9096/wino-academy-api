@@ -1,8 +1,8 @@
 // src/main/java/com/wino/academyapi/domain/auth/service/AuthService.java
 package com.wino.academyapi.domain.auth.service;
 
-import com.wino.academyapi.domain.admin.staff.entity.AdminUser;
-import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
+import com.wino.academyapi.domain.member.entity.AdminUser;
+import com.wino.academyapi.domain.member.repository.AdminUserRepository;
 import com.wino.academyapi.domain.appsetting.service.AppSettingService;
 import com.wino.academyapi.domain.auth.dto.AuthRequest;
 import com.wino.academyapi.domain.auth.entity.AdminUserSession;
@@ -13,7 +13,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 /**

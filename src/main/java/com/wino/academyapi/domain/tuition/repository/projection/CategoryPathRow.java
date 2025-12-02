@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/tuition/repository/projection/CategoryPathRow.java
 package com.wino.academyapi.domain.tuition.repository.projection;
 
 /**

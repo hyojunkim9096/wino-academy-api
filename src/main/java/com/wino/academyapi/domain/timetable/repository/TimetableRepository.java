@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/timetable/repository/TimetableRepository.java
 package com.wino.academyapi.domain.timetable.repository;
 
 import com.wino.academyapi.domain.timetable.dto.TimetableDtos.EventRes;

@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/timetable/dto/TimetableDtos.java
 package com.wino.academyapi.domain.timetable.dto;
 
 import lombok.*;

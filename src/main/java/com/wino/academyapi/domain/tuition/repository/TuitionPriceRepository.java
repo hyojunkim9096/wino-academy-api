@@ -1,3 +1,4 @@
+// src/main/java/com/wino/academyapi/domain/tuition/repository/TuitionPriceRepository.java
 package com.wino.academyapi.domain.tuition.repository;
 
 import com.wino.academyapi.domain.tuition.entity.TuitionPrice;

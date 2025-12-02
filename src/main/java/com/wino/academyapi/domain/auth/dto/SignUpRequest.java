@@ -2,7 +2,7 @@
 package com.wino.academyapi.domain.auth.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.wino.academyapi.domain.admin.staff.entity.EmployeeType;
+import com.wino.academyapi.domain.member.entity.EmployeeType;
 import jakarta.validation.constraints.*;
 import lombok.Getter;
 import lombok.Setter;

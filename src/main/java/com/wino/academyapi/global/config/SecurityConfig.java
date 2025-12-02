@@ -1,4 +1,3 @@
-// src/main/java/com/wino/academyapi/global/config/SecurityConfig.java
 package com.wino.academyapi.global.config;
 
 import com.wino.academyapi.domain.appsetting.service.AppSettingService;
@@ -51,9 +50,11 @@ public class SecurityConfig {
         http.cors(cors -> cors.configurationSource(request -> corsService.loadAsSpringConfig()));
 
         // 2. DB에서 동적 보안 규칙 가져오기 (security_rule 테이블)
-        boolean enabled = settingService.getFirstBooleanProfileAware(
-                new String[]{"security.dynamic.enabled"}, true
-        );
+        // ✅ AppSettingService 메서드명 변경 반영 (getFirstBooleanProfileAware -> getBooleanProfileAware 등)
+        // 만약 getFirstBooleanProfileAware가 그대로 있다면 유지, 아니면 getBoolean으로 변경
+        // 여기서는 기존 메서드명(getFirstBooleanProfileAware)을 유지한다고 가정 (배열형 메서드)
+        boolean enabled = getBooleanSetting("security.dynamic.enabled", true);
+
         // 활성화되어 있으면 DB 조회, 아니면 빈 리스트
         List<SecurityRule> rules = enabled ? ruleService.loadActiveRules() : Collections.emptyList();
 
@@ -70,7 +71,6 @@ public class SecurityConfig {
         http.authorizeHttpRequests(reg -> {
             // ================================================================
             // ✅ [핵심 수정] DB 설정과 무관하게 "무조건 허용"할 경로를 맨 위에 배치
-            //    이렇게 하면 DB에 규칙이 있든 없든, 가입/로그인은 403 없이 통과됩니다.
             // ================================================================
 
             // (1) Preflight 요청 (CORS를 위해 필수)
@@ -80,16 +80,16 @@ public class SecurityConfig {
             reg.requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico").permitAll();
             reg.requestMatchers("/uploads/**").permitAll();
 
-            // (3) 인증/가입 관련 API (여기가 막혀서 403이 떴던 것!)
+            // (3) 인증/가입 관련 API
             reg.requestMatchers(
                     "/api/auth/login",             // 로그인
                     "/api/auth/password-reset/**", // 비번 찾기
                     "/api/auth/logout-legacy",     // 구버전 로그아웃
-                    "/api/admin/register",         // ✅ 관리자 신규 가입 (이게 핵심!)
+                    "/api/admin/register",         // ✅ 관리자 신규 가입
                     "/api/admin/signUp"            // ✅ (호환용)
             ).permitAll();
 
-            // (4) 공통 데이터 조회 (지역, 학교 검색 등 로그인 전에도 필요할 수 있음)
+            // (4) 공통 데이터 조회
             reg.requestMatchers("/api/common/regions", "/api/common/regions/**").permitAll();
             reg.requestMatchers(HttpMethod.GET, "/api/common/schools", "/api/common/schools/**").permitAll();
 
@@ -111,8 +111,9 @@ public class SecurityConfig {
                 reg.requestMatchers(HttpMethod.DELETE, "/api/admin/db-connections/**", "/api/admin/auth/**")
                         .hasAuthority("ROLE_SYSTEM_ADMIN");
 
-                // 학교/지역 관리 등
-                reg.requestMatchers("/api/admin/schools/**", "/api/admin/regions/**")
+                // 학교/지역/반(Course) 관리 등
+                // ✅ [수정] /api/admin/courses/** 추가 (리네이밍 반영)
+                reg.requestMatchers("/api/admin/schools/**", "/api/admin/regions/**", "/api/admin/courses/**", "/api/admin/semesters/**")
                         .hasAnyAuthority("ROLE_SYSTEM_ADMIN", "ROLE_ADMIN");
 
             } else {
@@ -137,7 +138,7 @@ public class SecurityConfig {
                             if (anyMethod) reg.requestMatchers(p).authenticated();
                             else reg.requestMatchers(httpMethod, p).authenticated();
                         } else if (t == SecurityRuleAccessType.HAS_ANY_AUTHORITY) {
-                            // 권한 목록 파싱 (쉼표로 구분된 문자열)
+                            // 권한 목록 파싱
                             String[] auths = splitCsv(r.getAuthoritiesCsv());
                             if (auths.length > 0) {
                                 if (anyMethod) reg.requestMatchers(p).hasAnyAuthority(auths);
@@ -159,7 +160,7 @@ public class SecurityConfig {
         // 에러 핸들링 기본 설정
         http.exceptionHandling(Customizer.withDefaults());
 
-        // 필터 순서 설정: 세션 검증 -> JWT 인증 -> 스프링 시큐리티 처리
+        // 필터 순서 설정
         http.addFilterBefore(sessionValidationFilter, UsernamePasswordAuthenticationFilter.class);
 
         JwtAuthenticationFilter authFilter = jwtAuthenticationFilterProvider.getIfAvailable();
@@ -172,12 +173,22 @@ public class SecurityConfig {
 
     // --- 내부 유틸 함수들 ---
 
-    // 메서드가 비어있거나 "ALL"이면 true
+    // AppSettingService 호환용 헬퍼 (배열형 지원 여부에 따라 조정)
+    private boolean getBooleanSetting(String key, boolean def) {
+        // 만약 getFirstBooleanProfileAware 가 있다면 그것을 사용하고,
+        // 없다면 단일 조회 getBoolean 을 사용
+        try {
+            return settingService.getFirstBooleanProfileAware(new String[]{key}, def);
+        } catch (Exception e) {
+            // 메서드가 없거나 오류 시 단일 조회 시도
+            return settingService.getBoolean(key, def);
+        }
+    }
+
     private static boolean isAllOrBlank(String method) {
         return method == null || method.trim().isEmpty() || "ALL".equalsIgnoreCase(method.trim());
     }
 
-    // 문자열을 HttpMethod 객체로 변환 (실패시 null)
     private static HttpMethod parseHttpMethodOrNull(String method) {
         if (isAllOrBlank(method)) return null;
         try {
@@ -187,13 +198,11 @@ public class SecurityConfig {
         }
     }
 
-    // 콤마로 구분된 권한 문자열 분리
     private String[] splitCsv(String csv) {
         if (csv == null || csv.trim().isEmpty()) return new String[0];
         return csv.replace(" ", "").split("\\s*,\\s*");
     }
 
-    // Ant 패턴 확장 (/** 가 있으면 상위 경로도 포함해서 처리)
     private static List<String> expandAntPattern(String pattern) {
         if (pattern == null || pattern.isBlank()) return Collections.emptyList();
         String p = pattern.trim();

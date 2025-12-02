@@ -1,7 +1,7 @@
 package com.wino.academyapi.global.security;
 
-import com.wino.academyapi.domain.admin.staff.entity.AdminUser;
-import com.wino.academyapi.domain.admin.staff.repository.AdminUserRepository;
+import com.wino.academyapi.domain.member.entity.AdminUser;
+import com.wino.academyapi.domain.member.repository.AdminUserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;

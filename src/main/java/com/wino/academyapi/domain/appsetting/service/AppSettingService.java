@@ -19,13 +19,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 시스템 설정 조회/변경 서비스
  *
  * 조회 우선순위:
- *   DB(key@activeProfile) → DB(key) → yml(Environment) → null
- *
- * 기능:
- *   - 캐시: key 기준
- *   - CRUD(create, update, delete+archive)
- *   - 숫자/불리언 변환 유틸
- *   - getProfileAware / getFirst...(keys...)
+ * 1. DB (key@activeProfile)
+ * 2. DB (key)
+ * 3. YML/Environment (key)
+ * 4. null (기본값)
  */
 @Slf4j
 @Service
@@ -36,6 +33,7 @@ public class AppSettingService {
     private final AppSettingDeletedRepository deletedRepo;
     private final Environment env;
 
+    // 성능을 위한 인메모리 캐시 (key -> value)
     private final Map<String, String> cache = new ConcurrentHashMap<>();
 
     /* ================= 프로필 유틸 ================= */
@@ -52,11 +50,11 @@ public class AppSettingService {
             }
             if (StringUtils.hasText(p)) {
                 String v = p.trim().toLowerCase();
-                if ("local".equals(v) || "development".equals(v)) return "dev"; // ✅ 보정
+                if ("local".equals(v) || "development".equals(v)) return "dev"; // 보정
                 return p;
             }
         } catch (Exception ignored) {}
-        return "dev";
+        return "dev"; // 기본값
     }
 
     /** 캐시 무효화 (key와 key@profile 둘 다 제거) */
@@ -65,20 +63,21 @@ public class AppSettingService {
         cache.remove(key + "@" + activeProfile());
     }
 
-    /* ================= 조회 ================= */
+    /* ================= 조회 (Core Logic) ================= */
 
     /** 문자열 조회 (우선순위: DB@profile → DB → yml) */
     @Transactional(readOnly = true)
     public String get(String key) {
         if (!StringUtils.hasText(key)) return null;
 
+        // 1. 캐시 조회
         String hit = cache.get(key);
         if (hit != null) return hit;
 
         String profile = activeProfile();
         String profiledKey = key + "@" + profile;
 
-        // 1) DB: key@profile
+        // 2. DB 조회: key@profile (환경별 오버라이드)
         Optional<AppSetting> s = repo.findByKey(profiledKey);
         if (s.isPresent()) {
             String v = s.get().getValue();
@@ -86,7 +85,7 @@ public class AppSettingService {
             return v;
         }
 
-        // 2) DB: key
+        // 3. DB 조회: key (공통 설정)
         s = repo.findByKey(key);
         if (s.isPresent()) {
             String v = s.get().getValue();
@@ -94,7 +93,7 @@ public class AppSettingService {
             return v;
         }
 
-        // 3) yml
+        // 4. YML/Environment 조회 (최후의 수단)
         String v = env.getProperty(key);
         if (v != null) {
             cache.put(key, v);
@@ -143,7 +142,7 @@ public class AppSettingService {
         return defaultValue;
     }
 
-    /* ===== 여러 후보 키 중 '첫 매칭' 반환 ===== */
+    // ✅ [복구완료] 여러 후보 키 중 첫 매칭 값 반환 (배열형 조회 메서드들)
 
     @Transactional(readOnly = true)
     public String getFirstProfileAware(String[] keys, String defaultValue) {
@@ -185,7 +184,7 @@ public class AppSettingService {
         return defaultValue;
     }
 
-    /* ================= 목록/CRUD ================= */
+    /* ================= 목록/CRUD (관리자용) ================= */
 
     @Transactional(readOnly = true)
     public List<AppSetting> list() { return repo.findAll(); }
@@ -195,7 +194,10 @@ public class AppSettingService {
     public AppSetting create(AppSetting req, String createdBy) {
         String key = safeKey(req.getKey());
         if (!StringUtils.hasText(key)) throw new IllegalArgumentException("key는 필수입니다.");
-        repo.findByKey(key).ifPresent(x -> { throw new IllegalArgumentException("이미 존재하는 key 입니다: " + key); });
+
+        repo.findByKey(key).ifPresent(x -> {
+            throw new IllegalArgumentException("이미 존재하는 key 입니다: " + key);
+        });
 
         AppSetting saved = repo.save(
                 AppSetting.builder()
@@ -206,7 +208,6 @@ public class AppSettingService {
         );
 
         log.info("[AppSetting][CREATE] key={} by={}", key, createdBy);
-
         refresh(stripProfile(key));
         return saved;
     }
@@ -241,6 +242,7 @@ public class AppSettingService {
     public void deleteAndArchive(Long id, String deletedBy) {
         AppSetting s = repo.findById(id).orElseThrow(() -> new IllegalArgumentException("not found: " + id));
 
+        // 삭제 이력 저장 (같은 키로 여러 번 삭제될 수 있으므로, 최신 이력만 유지하거나 추가)
         deletedRepo.findTopByKeyOrderByDeletedAtDesc(s.getKey())
                 .ifPresentOrElse(existing -> {
                     existing.setSettingId(s.getId());
@@ -262,7 +264,6 @@ public class AppSettingService {
                 });
 
         repo.delete(s);
-
         refresh(stripProfile(s.getKey()));
         log.info("[AppSetting][DELETE] key={} by={}", s.getKey(), deletedBy);
     }
@@ -278,7 +279,7 @@ public class AppSettingService {
         return key == null ? null : key.trim();
     }
 
-    /** "abc@dev" → "abc" */
+    /** "abc@dev" → "abc" (캐시 키 정규화용) */
     private String stripProfile(String key) {
         if (!StringUtils.hasText(key)) return key;
         int at = key.indexOf('@');
