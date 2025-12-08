@@ -7,6 +7,7 @@ package com.wino.academyapi.domain.semester.entity;
  * - EXAM_PREP: 시험대비 학기 (중/고등부 대상)
  */
 public enum SemesterType {
-    REGULAR,
-    EXAM_PREP
+    REGULAR,    // 정규학기
+    EXAM_PREP,  // 시험대비
+    SEASONAL    // 계절학기 (방학 특강 등) ✅ 추가됨
 }

@@ -1,4 +1,3 @@
-// src/main/java/com/wino/academyapi/domain/enroll/repository/StudentClassEnrollmentRepository.java
 package com.wino.academyapi.domain.enroll.repository;
 
 import com.wino.academyapi.domain.enroll.entity.StudentClassEnrollment;
@@ -12,7 +11,7 @@ import java.util.List;
 /**
  * 학생 반 배정 리포지토리
  *
- * - 상태(status) 중심의 조회/집계(요구사항 유지)
+ * - 상태(status) 중심의 조회/집계
  * - 현재원 집계는 status='ACTIVE' 기준이며 MAIN/CROSS 구분 없음
  */
 public interface StudentClassEnrollmentRepository extends JpaRepository<StudentClassEnrollment, Long> {
@@ -65,6 +64,28 @@ public interface StudentClassEnrollmentRepository extends JpaRepository<StudentC
                                 @Param("cid") Long classId,
                                 @Param("excludeId") Long excludeId);
 
-    // ★ 추가: 해당 학생이 ACTIVE 배정(아무 반이나) 하나라도 갖고 있는지 빠르게 확인
+    /** * ★ 추가: 해당 학생이 ACTIVE 배정(아무 반이나) 하나라도 갖고 있는지 빠르게 확인
+     */
     boolean existsByStudent_IdAndStatus(Long studentId, String status);
+
+    /**
+     * ✅ [핵심 추가] 특정 학기에 이미 활성(ACTIVE) 상태인 메인(MAIN) 배정이 존재하는지 확인
+     * - Course(class_master)와 조인하여 학기(semester_id)를 비교
+     * - excludeEnrollId가 null이 아니면 해당 ID는 제외하고 검사 (수정 시 사용)
+     */
+    @Query("""
+        SELECT COUNT(e) > 0
+          FROM StudentClassEnrollment e
+          JOIN Course c ON e.classId = c.id
+         WHERE e.student.id = :studentId
+           AND c.semesterId = :semesterId
+           AND e.status = 'ACTIVE'
+           AND e.classStatusCode = 'MAIN'
+           AND (:excludeEnrollId IS NULL OR e.id <> :excludeEnrollId)
+    """)
+    boolean existsActiveMainInSemester(
+            @Param("studentId") Long studentId,
+            @Param("semesterId") Long semesterId,
+            @Param("excludeEnrollId") Long excludeEnrollId
+    );
 }
