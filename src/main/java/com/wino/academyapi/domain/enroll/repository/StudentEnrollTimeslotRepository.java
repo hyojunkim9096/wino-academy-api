@@ -1,29 +1,33 @@
-// src/main/java/com/wino/academyapi/domain/enroll/repository/StudentEnrollTimeslotRepository.java
 package com.wino.academyapi.domain.enroll.repository;
 
 import com.wino.academyapi.domain.enroll.entity.StudentEnrollTimeslot;
 import org.springframework.data.jpa.repository.JpaRepository;
-
-import java.util.Collection;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import java.util.List;
 
-/**
- * student_enroll_timeslot 레포지토리
- *
- * - 파생 쿼리 메서드로 삭제/조회/존재검사 제공
- * - 서비스 트랜잭션 내에서 사용 (서비스 @Transactional 관리)
- */
 public interface StudentEnrollTimeslotRepository extends JpaRepository<StudentEnrollTimeslot, Long> {
 
-    /** 특정 배정(enroll)의 매핑 전체 조회 */
-    List<StudentEnrollTimeslot> findByEnrollId(Long enrollId);
+    // ✅ 필드명 변경(enrollment)에 따라 메서드명도 변경
+    void deleteByEnrollmentId(Long enrollId);
 
-    /** 특정 배정에서 주어진 타임슬롯 ID들만 제거 */
-    void deleteByEnrollIdAndTimeslotIdIn(Long enrollId, Collection<Long> timeslotIds);
+    // ✅ 필드명 변경에 따라 메서드명도 변경
+    List<StudentEnrollTimeslot> findByEnrollmentId(Long enrollId);
 
-    /** 특정 배정에 특정 타임슬롯 매핑이 존재하는지 */
-    boolean existsByEnrollIdAndTimeslotId(Long enrollId, Long timeslotId);
-
-    /** 특정 배정의 매핑 전부 제거 (빈 배열 치환 시 사용) */
-    void deleteByEnrollId(Long enrollId);
+    /**
+     * 학생의 '현재 수강 중인(ACTIVE)' 타임슬롯 ID 목록 조회
+     * - setl.enrollment 필드를 통해 조인 수행
+     */
+    @Query("""
+        SELECT setl.timeslotId
+          FROM StudentEnrollTimeslot setl
+          JOIN setl.enrollment e
+         WHERE e.student.id = :studentId
+           AND e.status = 'ACTIVE'
+           AND (:excludeEnrollId IS NULL OR e.id <> :excludeEnrollId)
+    """)
+    List<Long> findActiveTimeslotIdsByStudent(
+            @Param("studentId") Long studentId,
+            @Param("excludeEnrollId") Long excludeEnrollId
+    );
 }

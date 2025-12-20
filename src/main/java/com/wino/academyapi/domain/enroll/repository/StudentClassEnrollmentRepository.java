@@ -6,7 +6,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 학생 반 배정 리포지토리
@@ -64,7 +66,8 @@ public interface StudentClassEnrollmentRepository extends JpaRepository<StudentC
                                 @Param("cid") Long classId,
                                 @Param("excludeId") Long excludeId);
 
-    /** * ★ 추가: 해당 학생이 ACTIVE 배정(아무 반이나) 하나라도 갖고 있는지 빠르게 확인
+    /**
+     * 해당 학생이 ACTIVE 배정(아무 반이나) 하나라도 갖고 있는지 빠르게 확인
      */
     boolean existsByStudent_IdAndStatus(Long studentId, String status);
 
@@ -88,4 +91,11 @@ public interface StudentClassEnrollmentRepository extends JpaRepository<StudentC
             @Param("semesterId") Long semesterId,
             @Param("excludeEnrollId") Long excludeEnrollId
     );
+
+    /**
+     * ✅ [핵심 추가] 재가입 로직용 조회
+     * - (학생 + 반 + 시작일) 조합으로 기존 데이터 찾기 (상태 무관 - 종료된 것도 포함)
+     * - 이미 종료된(END) 데이터가 있으면 UPDATE 하기 위함 (Duplicate Key Error 방지)
+     */
+    Optional<StudentClassEnrollment> findByStudent_IdAndClassIdAndEnrolledAt(Long studentId, Long classId, LocalDate enrolledAt);
 }

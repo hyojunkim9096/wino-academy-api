@@ -1,4 +1,3 @@
-// src/main/java/com/wino/academyapi/domain/student/entity/StudentSibling.java
 package com.wino.academyapi.domain.student.entity;
 
 import jakarta.persistence.*;
@@ -8,10 +7,14 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 /**
- * 형제/자매 연결(무방향) 엔티티 (student_sibling)
- * - DDL 트리거(trg_sibling_bi_normalize)가 studentId1/2를 low_id/high_id로 자동 정규화합니다.
- * - JPA는 studentId1, studentId2 필드에 값을 "쓰고",
- * - low, high 필드(FK)를 통해 정규화된 학생 정보를 "읽습니다".
+ * 형제/자매 연결 엔티티 (student_sibling)
+ * --------------------------------------------------------
+ * [동작 원리]
+ * 1. Java 앱은 'studentId1', 'studentId2'에 값을 넣어 저장(INSERT)합니다.
+ * 2. DB 트리거(trg_sibling_bi_normalize)가 자동으로 두 ID를 비교하여
+ * 작은 값 -> low_id, 큰 값 -> high_id 컬럼에 값을 채워줍니다.
+ * 3. Java 앱은 'low', 'high' 연관관계를 통해 정렬된 학생 정보를 조회합니다.
+ * --------------------------------------------------------
  */
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
@@ -30,35 +33,31 @@ public class StudentSibling {
     private Long id;
 
     /**
-     * 학생1 (임시 입력값)
-     * - 이 필드는 오직 INSERT/UPDATE 시 DB 트리거에 값을 전달하기 위해 사용됩니다.
-     * - 읽기(조회)에는 사용하지 않습니다.
+     * 입력용 학생 1 (DB 트리거가 사용)
      */
-    @Column(name = "student_id_1", nullable = false, updatable = false)
+    @Column(name = "student_id_1", nullable = false)
     private Long studentId1;
 
     /**
-     * 학생2 (임시 입력값)
-     * - 이 필드는 오직 INSERT/UPDATE 시 DB 트리거에 값을 전달하기 위해 사용됩니다.
-     * - 읽기(조회)에는 사용하지 않습니다.
+     * 입력용 학생 2 (DB 트리거가 사용)
      */
-    @Column(name = "student_id_2", nullable = false, updatable = false)
+    @Column(name = "student_id_2", nullable = false)
     private Long studentId2;
 
     /**
-     * 정규화된 학생1 (ID가 더 작은 쪽)
-     * - DDL 트리거가 채우므로 insertable/updatable = false
+     * 정규화된 학생1 (ID가 더 작은 쪽) - 조회 전용 (Read-Only)
+     * - DB 트리거가 low_id 컬럼을 채워줌
      */
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "low_id", nullable = false, insertable = false, updatable = false)
+    @JoinColumn(name = "low_id", insertable = false, updatable = false)
     private Student low;
 
     /**
-     * 정규화된 학생2 (ID가 더 큰 쪽)
-     * - DDL 트리거가 채우므로 insertable/updatable = false
+     * 정규화된 학생2 (ID가 더 큰 쪽) - 조회 전용 (Read-Only)
+     * - DB 트리거가 high_id 컬럼을 채워줌
      */
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "high_id", nullable = false, insertable = false, updatable = false)
+    @JoinColumn(name = "high_id", insertable = false, updatable = false)
     private Student high;
 
     @Column(name = "relation_note", length = 100)

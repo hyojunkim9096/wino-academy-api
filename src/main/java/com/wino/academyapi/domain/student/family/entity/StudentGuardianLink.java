@@ -1,4 +1,3 @@
-// src/main/java/com/wino/academyapi/domain/student/family/entity/StudentGuardianLink.java
 package com.wino.academyapi.domain.student.family.entity;
 
 import com.wino.academyapi.domain.guardian.entity.Guardian;
@@ -12,9 +11,9 @@ import java.time.LocalDateTime;
 
 /**
  * DDL: student_guardian_link (학생-보호자 연결)
- *  - (student_id, guardian_id) 유니크
- *  - 다양한 불리언 플래그
- *  - 히스토리/트리거는 DB에서 처리(DDL 참조)
+ * - (student_id, guardian_id) 유니크
+ * - 다양한 불리언 플래그 (대표, 법정대리인, 알림수신 등)
+ * - 히스토리/트리거는 DB에서 처리(DDL 참조)
  */
 @Getter
 @Setter
@@ -56,13 +55,13 @@ public class StudentGuardianLink {
     )
     private Guardian guardian;
 
-    /** 관계 코드 */
+    /** 관계 코드 (FATHER, MOTHER, GRANDPARENT 등) */
     @Column(name = "relation_code", nullable = false, length = 32)
     private String relationCode;
 
-    /** 대표 여부 */
+    /** ✅ 대표 여부 (isPrimary로 통일) */
     @Column(name = "is_primary", nullable = false)
-    private boolean primary;
+    private boolean isPrimary;
 
     /** 법정대리인 여부 */
     @Column(name = "legal_guardian", nullable = false)

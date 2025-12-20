@@ -1,4 +1,3 @@
-// src/main/java/com/wino/academyapi/domain/enroll/entity/StudentEnrollTimeslot.java
 package com.wino.academyapi.domain.enroll.entity;
 
 import jakarta.persistence.*;
@@ -13,14 +12,7 @@ import java.time.LocalDateTime;
  *
  * - 각 행은 "한 배정(enroll) ↔ 한 타임슬롯(timeslot)" 연결을 의미
  * - DDL: UNIQUE (enroll_id, timeslot_id)
- * - 유효성/히스토리/요일집계는 DB 트리거가 처리
- *   · 유효성: 해당 enroll의 class_id에 속한 timeslot인지 검증
- *   · 히스토리: *_hist 테이블에 적재
- *   · 요일집계: fn_enroll_days_mask 로 student_class_enrollment.attend_days_mask 갱신
- *
- * 설계 포인트:
- * - 단순 FK 숫자 보관 전략(연관 엔티티 미지정)으로 의존성/로딩비용 최소화
- * - 치환(Replace) 정책을 서비스에서 구현 → 트리거가 마스크/이력 자동 반영
+ * - JPA: StudentClassEnrollment 와 @ManyToOne 관계 설정 (조인 쿼리 지원)
  */
 @Getter
 @Setter
@@ -41,30 +33,31 @@ import java.time.LocalDateTime;
 )
 public class StudentEnrollTimeslot {
 
-    /** PK */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** 배정 FK (student_class_enrollment.id) — CASCADE */
-    @Column(name = "enroll_id", nullable = false)
-    private Long enrollId;
+    /**
+     * ✅ [수정] 단순 ID 대신 연관관계 매핑
+     * - Repository에서 JOIN 쿼리를 사용하기 위해 필요
+     * - FetchType.LAZY로 설정하여 불필요한 로딩 방지
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "enroll_id", nullable = false)
+    private StudentClassEnrollment enrollment;
 
-    /** 타임슬롯 FK (class_timeslot.id) — RESTRICT */
+    /** 타임슬롯 FK (class_timeslot.id) — 타임슬롯은 단순 참조용이라 ID 유지 */
     @Column(name = "timeslot_id", nullable = false)
     private Long timeslotId;
 
-    /** 생성 시각 */
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    /** 수정 시각 */
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    /** 마지막 수정자(@app_user_id = admin_user_info.id). NULL 가능 */
     @Column(name = "updated_by")
     private Long updatedBy;
 }

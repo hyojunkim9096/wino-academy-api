@@ -1,6 +1,6 @@
 package com.wino.academyapi.domain.course.service;
 
-import com.wino.academyapi.domain.course.dto.CourseOpsDtos; // ✅ DTO 이름 변경 반영 (또는 ClassOpsDtos)
+import com.wino.academyapi.domain.course.dto.CourseOpsDtos;
 import com.wino.academyapi.infra.db.DbSessionVars;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,33 +19,30 @@ import java.util.Map;
 /**
  * 반(Course) 운영 작업 서비스 (스냅샷/마감/복원/미리보기)
  * -----------------------------------------------------------------------------
- * - 중요 이슈: class_master_hist 테이블의 code_full 컬럼이 NOT NULL인데
- * 기존 INSERT가 값을 공급하지 않아 MySQL 1364 에러가 발생했음.
- * => 본 파일에서는 모든 "cm 히스토리 SNAP" INSERT에 code_full 값을 추가한다.
+ * - 주요 기능:
+ * 1. 학기 마감 (Close): 현재 반/과목/시간표 상태를 히스토리(SNAP)로 저장하고 메인 테이블을 초기화.
+ * 2. 되돌리기 (Restore): 특정 시점의 스냅샷 데이터를 메인 테이블로 역방향 복사.
+ * 3. 미리보기 (Preview): 마감/복원 시 영향받는 데이터 건수를 미리 계산.
  *
- * - 스냅샷 시(cm/cs/ct):
- * * class_master_hist  : grade_code / class_code / **code_full(계산식)** 포함
- * * class_subject_hist : (기존과 동일) subject_name_snapshot 포함
- * * class_timeslot_hist: class_time_code/label, room_id 포함
+ * - 데이터 무결성:
+ * * class_master_hist 테이블의 'code_full' 컬럼은 NOT NULL이므로,
+ * INSERT 시 CONCAT_WS('-', grade_code, class_code, code) 로직으로 값을 생성하여 넣음.
+ * * 복원 시 임시 테이블(tmp_restore_*)을 사용하여 대량 데이터 처리 성능 확보.
  *
- * - 복원 시:
- * * 복원 직전 pre-SNAPSHOT(옵션 true)에서도 위와 동일하게 cm에 code_full 공급
- * * 복원 데이터 임시 테이블을 경유하여 1442 문제 회피
- *
- * - 모든 "쓰기" 트랜잭션 시작 시 dbVars.setAppVars(userId, note) 호출로
- * 같은 커넥션의 MySQL 세션 변수(@app_user_id, @event_note)를 설정하여
- * 트리거/히스토리 event_by / event_note가 올바르게 기록되도록 한다.
+ * - 감사 로그:
+ * * 모든 쓰기 트랜잭션 시작 시 dbVars.setAppVars()를 호출하여
+ * MySQL 세션 변수(@app_user_id, @event_note)를 설정함 -> 트리거에서 자동 기록.
  * -----------------------------------------------------------------------------
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> CourseOpsService
+public class CourseOpsService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final DbSessionVars dbVars;
 
-    // 드라이버별 Timestamp 변환 보조
+    // 드라이버별 Timestamp 변환 보조 유틸
     private static Timestamp asTimestamp(Object v) {
         if (v == null) return null;
         if (v instanceof Timestamp ts)       return ts;
@@ -56,11 +53,12 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
     }
 
     // ────────────────────────────────────────────────────────────────
-    // PREVIEW
+    // 1. PREVIEW (영향 범위 미리보기)
     // ────────────────────────────────────────────────────────────────
-    public CourseOpsDtos.PreviewRes preview(String work, String stage, Long semId){ // ✅ DTO 변경
+    public CourseOpsDtos.PreviewRes preview(String work, String stage, Long semId){
         var p = params(work, stage, semId);
 
+        // 1) 현재 학기에 속한 반 개수
         long classCnt = jdbc.queryForObject("""
             SELECT COUNT(*)
               FROM class_master cm
@@ -69,6 +67,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
                AND cm.semester_id       = :semId
         """, p, Long.class);
 
+        // 2) 해당 반들의 과목 개수
         long subjectCnt = jdbc.queryForObject("""
             SELECT COUNT(*)
               FROM class_subject cs
@@ -78,6 +77,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
                AND cm.semester_id       = :semId
         """, p, Long.class);
 
+        // 3) 해당 과목들의 시간표 슬롯 개수
         long slotCnt = jdbc.queryForObject("""
             SELECT COUNT(*)
               FROM class_timeslot ct
@@ -88,6 +88,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
                AND cm.semester_id       = :semId
         """, p, Long.class);
 
+        // 4) 해당 학기의 마지막 스냅샷 일시 조회
         Object lastSnapObj = jdbc.queryForObject("""
             SELECT MAX(h.event_at)
               FROM class_master_hist h
@@ -104,7 +105,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
     }
 
     // ────────────────────────────────────────────────────────────────
-    // CLOSE (SNAP + 초기화)
+    // 2. CLOSE (스냅샷 저장 + 학기 초기화)
     // ────────────────────────────────────────────────────────────────
     @Transactional
     public CourseOpsDtos.SimpleAck snapshotAndClose(Long appUserId, CourseOpsDtos.CloseReq req){
@@ -112,7 +113,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
         String note = (req.getNote() == null || req.getNote().isBlank()) ? "학기 마감(ops)" : req.getNote().trim();
         p.addValue("note", note);
 
-        // DB 세션 변수 주입(@app_user_id, @event_note) → 트리거에서 event_by/note 기록
+        // DB 세션 변수 주입(@app_user_id, @event_note) → 트리거/히스토리 기록용
         dbVars.setAppVars(appUserId, note);
 
         Timestamp snapAt = new Timestamp(System.currentTimeMillis());
@@ -126,7 +127,8 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
                AND cm.semester_id       = :semId
         """, p, Long.class);
 
-        // ⚠️ FIXED: class_master_hist SNAP 시 code_full 컬럼에 값 공급(계산식)
+        // (1) class_master_hist SNAPSHOT 저장
+        // ⚠️ code_full 컬럼 필수: grade/class/code 조합하여 생성
         int cmSnap = jdbc.update("""
             INSERT INTO class_master_hist
             (ref_id, version, event_type, event_at, event_by, event_note,
@@ -153,7 +155,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
               AND cm.semester_id       = :semId
         """, p);
 
-        // class_subject SNAP (변경 없음)
+        // (2) class_subject_hist SNAPSHOT 저장
         int csSnap = jdbc.update("""
             INSERT INTO class_subject_hist
             (ref_id, version, event_type, event_at, event_by, event_note,
@@ -173,7 +175,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
               AND cm.semester_id       = :semId
         """, p);
 
-        // class_timeslot SNAP (code/label/room_id 포함)
+        // (3) class_timeslot_hist SNAPSHOT 저장
         int ctSnap = jdbc.update("""
             INSERT INTO class_timeslot_hist
             (ref_id, version, event_type, event_at, event_by, event_note,
@@ -193,7 +195,23 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
               AND cm.semester_id       = :semId
         """, p);
 
-        // 초기화 (과목 담당 NULL, 슬롯 삭제, 학기/담임 NULL)
+        // ✅ [추가] 4. 학생 배정(Enrollment) 종료 처리 (ACTIVE -> END)
+        // 학기가 끝나면 수강 중이던 학생들의 상태를 '종료'로 변경하고 종료일(left_at)을 오늘로 설정
+        int enrollClose = jdbc.update("""
+            UPDATE student_class_enrollment sce
+            JOIN class_master cm ON cm.id = sce.class_id
+            SET sce.status = 'END',
+                sce.left_at = DATE(NOW()),
+                sce.updated_at = NOW(),
+                sce.updated_by = @app_user_id
+            WHERE cm.work_location_code = :work
+              AND cm.school_stage = :stage
+              AND cm.semester_id = :semId
+              AND sce.status = 'ACTIVE'
+        """, p);
+
+        // (5) 데이터 초기화 (Reset)
+        // 5-1. 과목 담당 교사 NULL 처리
         int csClr = jdbc.update("""
             UPDATE class_subject cs
             JOIN class_master cm ON cm.id = cs.class_id
@@ -204,6 +222,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
                 cs.updated_at = NOW()
         """, p);
 
+        // 5-2. 시간표 슬롯 전체 삭제
         int ctDel = jdbc.update("""
             DELETE ct FROM class_timeslot ct
             JOIN class_subject cs ON cs.id = ct.class_subject_id
@@ -213,6 +232,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
               AND cm.semester_id       = :semId
         """, p);
 
+        // 5-3. 반 정보 초기화 (학기, 담임 NULL)
         int cmClr = jdbc.update("""
             UPDATE class_master cm
                SET cm.semester_id = NULL,
@@ -223,15 +243,15 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
                AND cm.semester_id       = :semId
         """, p);
 
-        log.info("[Ops CLOSE] SNAP cm/cs/ct = {}/{}/{}, CLEAR cm/cs/ctDel = {}/{}/{}",
-                cmSnap, csSnap, ctSnap, cmClr, csClr, ctDel);
+        log.info("[Ops CLOSE] SNAP cm/cs/ct = {}/{}/{}, EnrollClose={}, CLEAR cm/cs/ctDel = {}/{}/{}",
+                cmSnap, csSnap, ctSnap, enrollClose, cmClr, csClr, ctDel);
 
         return new CourseOpsDtos.SimpleAck("snapshot+close done",
                 beforeClasses, csClr, ctDel);
     }
 
     // ────────────────────────────────────────────────────────────────
-    // RESTORE (선스냅샷 옵션 + 복원)
+    // 3. RESTORE (스냅샷 복원)
     // ────────────────────────────────────────────────────────────────
     @Transactional
     public CourseOpsDtos.SimpleAck restoreFromSnapshot(Long appUserId, CourseOpsDtos.RestoreReq req){
@@ -247,7 +267,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
             throw new IllegalArgumentException("복원할 항목이 없습니다.");
         }
 
-        // 1) 반별 마지막 master SNAP 시각(해당 학기 기준)
+        // 1) 반별 마지막 master SNAP 시각(해당 학기 기준) 조회
         Map<Long, Timestamp> lastByClass = new LinkedHashMap<>();
         List<Map<String, Object>> rows = jdbc.queryForList("""
             SELECT h.ref_id AS class_id, MAX(h.event_at) AS last_at
@@ -268,7 +288,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
             throw new IllegalStateException("선택한 범위에서 복원할 스냅샷을 찾을 수 없습니다.");
         }
 
-        // 2) 임시 테이블 준비(복원용 버퍼)
+        // 2) 임시 테이블 준비 (복원 대상 ID 버퍼)
         jdbc.getJdbcOperations().execute("CREATE TEMPORARY TABLE IF NOT EXISTS tmp_restore_class (class_id BIGINT PRIMARY KEY)");
         jdbc.getJdbcOperations().execute("""
             CREATE TEMPORARY TABLE IF NOT EXISTS tmp_restore_master (
@@ -300,12 +320,13 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
                 use_yn TINYINT(1)
             )
         """);
+        // 기존 데이터 클리어
         jdbc.getJdbcOperations().execute("DELETE FROM tmp_restore_class");
         jdbc.getJdbcOperations().execute("DELETE FROM tmp_restore_master");
         jdbc.getJdbcOperations().execute("DELETE FROM tmp_restore_subject");
         jdbc.getJdbcOperations().execute("DELETE FROM tmp_restore_timeslot");
 
-        // 3) 대상 반 적재 + 테이블별 SNAP 기준 시각 보정
+        // 3) 대상 반 적재 + 테이블별 SNAP 기준 시각 보정하여 데이터 로드
         for (var e : lastByClass.entrySet()) {
             Long classId = e.getKey();
             Timestamp masterSnapAt = e.getValue();
@@ -376,13 +397,12 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
             }
         }
 
-        // 3.5) (옵션) 되돌리기 직전 '현재 상태'를 SNAP 으로 저장(권장: true)
+        // 3.5) (옵션) 되돌리기 직전 '현재 상태'를 SNAP 으로 안전 저장 (권장: true)
         if (req.isPreSnapshot()) {
             var p = new MapSqlParameterSource()
                     .addValue("note", (note + " (pre-restore SNAP)").trim())
                     .addValue("snapAt", new Timestamp(System.currentTimeMillis()));
 
-            // ⚠️ FIXED: 여기서도 code_full을 동일 계산식으로 공급
             int preCmSnap = jdbc.update("""
                 INSERT INTO class_master_hist
                 (ref_id, version, event_type, event_at, event_by, event_note,
@@ -443,7 +463,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
             log.info("[Ops RESTORE] pre-SNAP cm/cs/ct = {}/{}/{}", preCmSnap, preCsSnap, preCtSnap);
         }
 
-        // 4) 실제 복원
+        // 4) 실제 복원 (UPDATE / DELETE / INSERT)
         long affectedC = 0, affectedS = 0, affectedTDel = 0, affectedTIns = 0;
 
         if (restoreClass) {
@@ -468,6 +488,7 @@ public class CourseOpsService { // ✅ 클래스명 변경: ClassOpsService -> C
         }
 
         if (restoreTimeslot) {
+            // 시간표는 전체 삭제 후 재입력 방식
             affectedTDel = jdbc.update("""
                 DELETE ct FROM class_timeslot ct
                 JOIN class_subject cs ON cs.id = ct.class_subject_id

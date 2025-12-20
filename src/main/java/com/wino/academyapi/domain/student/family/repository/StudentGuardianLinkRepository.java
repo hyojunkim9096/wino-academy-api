@@ -1,4 +1,3 @@
-// src/main/java/com/wino/academyapi/domain/student/family/repository/StudentGuardianLinkRepository.java
 package com.wino.academyapi.domain.student.family.repository;
 
 import com.wino.academyapi.domain.student.family.dto.GuardianLinkSummary;
@@ -14,39 +13,42 @@ public interface StudentGuardianLinkRepository extends JpaRepository<StudentGuar
 
     Optional<StudentGuardianLink> findByStudent_IdAndGuardian_Id(Long studentId, Long guardianId);
 
-    List<StudentGuardianLink> findByStudent_Id(Long studentId);
+    @Query("select l from StudentGuardianLink l join fetch l.guardian where l.student.id = :studentId")
+    List<StudentGuardianLink> findByStudentId(@Param("studentId") Long studentId);
 
     List<StudentGuardianLink> findByGuardian_Id(Long guardianId);
 
     /**
-     * 학생 기준: 가족(보호자)+링크 요약을 DTO로 바로 조회
-     * - GuardianLinkSummary: 보호자 + 계정(ID) + 링크 플래그
+     * 학생 기준: 가족(보호자)+링크 요약을 DTO로 조회
+     * - JPQL 생성자 내부에는 주석을 넣으면 파싱 에러가 발생할 수 있어 제거함.
      */
     @Query("""
         select new com.wino.academyapi.domain.student.family.dto.GuardianLinkSummary(
-            l.id, g.id, g.name, g.phone, g.email,
-            l.relationCode, l.primary, l.legalGuardian, l.receiveNotice, l.receiveBilling,
-            u.id, u.loginId
+            l.id,
+            g.id,
+            g.name,
+            g.phone,
+            g.email,
+            l.relationCode,
+            l.isPrimary,
+            l.legalGuardian,
+            l.receiveNotice,
+            l.receiveBilling,
+            u.id,
+            u.loginId
         )
         from StudentGuardianLink l
         join l.guardian g
         left join g.endUserMap m
         left join m.user u
         where l.student.id = :studentId
-        order by l.primary desc, lower(g.name) asc, l.id desc
+        order by l.isPrimary desc, g.name asc, l.id desc
     """)
     List<GuardianLinkSummary> findGuardianSummariesByStudent(@Param("studentId") Long studentId);
 
     /**
-     * 보호자 기준: 학생 + 링크 요약을 DTO로 바로 조회
-     * - ✅ [수정] 공통코드(CommonCode) 조인으로
-     *   학부/지점/상태/관계의 "코드 + 이름"을 함께 가져옵니다.
-     *
-     * group_code 값은 DB 공통코드 규칙에 맞춰 사용:
-     *   - SCHOOL_STAGE   : 학부
-     *   - WORK_LOCATION  : 소속관
-     *   - STUDENT_STATUS : 학생 상태
-     *   - FAMILY_REL     : 가족 관계
+     * 보호자 기준: 학생 + 링크 요약을 DTO로 조회
+     * - 공통코드(CommonCode)와 조인하여 한글 명칭을 포함
      */
     @Query("""
         select new com.wino.academyapi.domain.student.family.dto.StudentLinkSummary(
@@ -58,10 +60,10 @@ public interface StudentGuardianLinkRepository extends JpaRepository<StudentGuar
             s.workLocationCode,
             loc.name,
             s.status,
-            st.name,
+            st.name, 
             l.relationCode,
             rel.name,
-            l.primary,
+            l.isPrimary,
             l.legalGuardian,
             l.receiveNotice,
             l.receiveBilling
@@ -77,7 +79,7 @@ public interface StudentGuardianLinkRepository extends JpaRepository<StudentGuar
         left join com.wino.academyapi.domain.code.entity.CommonCode rel
             on rel.groupCode = 'FAMILY_REL' and rel.code = l.relationCode
         where l.guardian.id = :guardianId
-        order by l.primary desc, lower(s.name) asc, l.id desc
+        order by l.isPrimary desc, s.name asc, l.id desc
     """)
     List<StudentLinkSummary> findStudentSummariesByGuardian(@Param("guardianId") Long guardianId);
 }

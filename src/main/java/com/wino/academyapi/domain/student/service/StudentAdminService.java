@@ -1,4 +1,3 @@
-// src/main/java/com/wino/academyapi/domain/student/service/StudentAdminService.java
 package com.wino.academyapi.domain.student.service;
 
 import com.wino.academyapi.domain.member.repository.AdminUserRepository;
@@ -54,29 +53,16 @@ public class StudentAdminService {
     private final LocalFileStorageService storage;
     private final PublicUrlHelper publicUrlHelper;
     private final DbSessionVars dbVars;
-
-    // ✅ FileRepository 직접 주입 (storage 서비스와 역할 분리)
     private final AttachFileRepository fileRepo;
-
-    /* enduser */
     private final EndUserRepository endUserRepo;
     private final EndUserStudentMapRepository mapRepo;
     private final PasswordEncoder passwordEncoder;
-
-    /* 학교 */
     private final SchoolRepository schoolRepo;
-
-    /* 학생 메모 */
     private final StudentMemoRepository memoRepo;
-
-    // ✅ 형제 리포지토리 주입
     private final StudentSiblingRepository siblingRepo;
-
-    /* 메타(히스토리 + 작성자명) */
     private final StudentHistRepository histRepo;
     private final AdminUserRepository adminUserRepo;
 
-    /** 날짜 포맷 (프런트 표준 포맷) */
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /* ================= 조회 ================= */
@@ -88,14 +74,10 @@ public class StudentAdminService {
         String wl  = emptyToNull(workLocation);
         String kw  = emptyToNull(keyword);
 
-        // ✅ N+1이 해결된 DTO 프로젝션 쿼리 사용
         Page<StudentSummary> summaryPage = repo.searchWithSummary(stg, wl, kw, pageable);
 
-        // 메타정보(createdAt/By)와 사진URL(photoUrl) 후처리
         summaryPage.getContent().forEach(dto -> {
-            // (1) 메타 정보 주입
             enrichMeta(dto, dto.getId());
-            // (2) 사진 URL 주입
             if (dto.getProfileImageId() != null) {
                 AttachFile f = fileRepo.findById(dto.getProfileImageId()).orElse(null);
                 if (f != null) {
@@ -126,7 +108,6 @@ public class StudentAdminService {
 
     @Transactional
     public StudentSummary create(StudentCreateRequest p) {
-        // 🔐 앱 세션 변수 주입(@app_user_id, @event_note) — DB 트리거에서 참조
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
 
         Student s = Student.builder()
@@ -222,7 +203,6 @@ public class StudentAdminService {
         return saved.getId();
     }
 
-    /** 🔐 비밀번호 변경 — 없는 계정이면 생성 후 암호 설정 */
     @Transactional
     public void changePassword(Long studentId, String rawPw) {
         String trimmed = (rawPw == null ? "" : rawPw.trim());
@@ -235,7 +215,6 @@ public class StudentAdminService {
         endUserRepo.save(eu);
     }
 
-    /** ✅ 로그인ID/비번 upsert (둘 중 전달된 것만 변경) */
     @Transactional
     public void upsertAccount(Long studentId, AccountUpsertRequest req){
         dbVars.setAppVars(AppUserContext.getUserId(), AppUserContext.getNote());
@@ -261,8 +240,6 @@ public class StudentAdminService {
         eu.setUpdatedAt(LocalDateTime.now());
         endUserRepo.save(eu);
     }
-
-    /* ================= 🆕 학생 메모 수정/삭제 (컨트롤러에서 호출) ================= */
 
     @Transactional
     public void updateMemo(Long memoId, String content, Boolean pinned) {
@@ -294,24 +271,14 @@ public class StudentAdminService {
     // ✅ 형제/자매 관리 로직
     // =====================================================================
 
-    /**
-     * 특정 학생에 연결된 모든 형제/자매의 DTO 목록을 반환합니다.
-     */
     @Transactional(readOnly = true)
     public List<SiblingLinkDto> listSiblings(Long studentId) {
-        // 1. 내가 Low일 때 (상대방 High 조회)
         List<SiblingLinkDto> list1 = siblingRepo.findSiblingsAsLow(studentId);
-        // 2. 내가 High일 때 (상대방 Low 조회)
         List<SiblingLinkDto> list2 = siblingRepo.findSiblingsAsHigh(studentId);
-
-        // 3. 병합
         return Stream.concat(list1.stream(), list2.stream())
                 .collect(Collectors.toList());
     }
 
-    /**
-     * 두 학생을 형제/자매로 연결합니다.
-     */
     @Transactional
     public Long linkSibling(Long studentId1, SiblingCreateRequest req) {
         dbVars.setAppVars(AppUserContext.getUserId(), "Link Sibling");
@@ -324,8 +291,15 @@ public class StudentAdminService {
             throw new ResponseStatusException(BAD_REQUEST, "동일한 학생을 형제로 연결할 수 없습니다.");
         }
 
-        // DB 트리거가 (low_id, high_id) Unique 제약을 처리해주므로,
-        // 서비스 레이어에서는 student_id_1, student_id_2만 세팅합니다.
+        // 중복 체크는 정렬된 low/high 기준으로 수행
+        Long low = Math.min(studentId1, studentId2);
+        Long high = Math.max(studentId1, studentId2);
+
+        if (siblingRepo.existsConnection(low, high)) {
+            throw new ResponseStatusException(CONFLICT, "이미 형제로 연결된 관계입니다.");
+        }
+
+        // ✅ [수정] 저장은 studentId1, studentId2에 값을 넣어서 DB 트리거가 동작하게 함
         StudentSibling sibling = StudentSibling.builder()
                 .studentId1(studentId1)
                 .studentId2(studentId2)
@@ -336,13 +310,10 @@ public class StudentAdminService {
             StudentSibling saved = siblingRepo.save(sibling);
             return saved.getId();
         } catch (Exception e) {
-            throw new ResponseStatusException(CONFLICT, "이미 형제로 연결된 관계입니다.", e);
+            throw new ResponseStatusException(CONFLICT, "연결 저장 중 오류가 발생했습니다.", e);
         }
     }
 
-    /**
-     * 형제/자매 연결을 해제합니다.
-     */
     @Transactional
     public void unlinkSibling(Long linkId) {
         dbVars.setAppVars(AppUserContext.getUserId(), "Unlink Sibling");
@@ -352,30 +323,18 @@ public class StudentAdminService {
         siblingRepo.deleteById(linkId);
     }
 
-
     /* ================= 매핑/유틸 ================= */
 
-    /**
-     * ✅ [수정] 학생 계정(EndUser) 확보 로직 개선 (ObjectOptimisticLockingFailureException 방지)
-     * - 이미 매핑이 있으면 그 유저 반환
-     * - 없으면 새 EndUser 생성 후 매핑 테이블에 'INSERT'
-     * - saveAndFlush() 사용하여 즉시 DB 반영
-     */
     private EndUser ensureEndUserForStudent(Long studentId) {
-        // 1. 매핑 존재 여부 확인
         Optional<EndUserStudentMap> mapOpt = mapRepo.findByStudentId(studentId);
 
         if (mapOpt.isPresent()) {
-            // 이미 계정이 존재하면 해당 계정 반환
             Long userId = mapOpt.get().getUserId();
             return endUserRepo.findById(userId)
                     .orElseThrow(() -> new IllegalStateException("EndUserStudentMap mismatch: user " + userId + " not found"));
         }
 
-        // 2. 계정이 없으면 새로 생성
         LocalDateTime now = LocalDateTime.now();
-
-        // 2-1. EndUser 생성 (먼저 저장해서 ID 확보)
         EndUser eu = EndUser.builder()
                 .userType("STUDENT")
                 .status("ACTIVE")
@@ -383,18 +342,16 @@ public class StudentAdminService {
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
-        EndUser savedUser = endUserRepo.saveAndFlush(eu); // ✅ 즉시 반영
+        EndUser savedUser = endUserRepo.saveAndFlush(eu);
 
-        // 2-2. Student 프록시 조회
         Student studentRef = repo.getReferenceById(studentId);
 
-        // 2-3. 매핑 테이블 저장 (새로운 ID로 INSERT 보장)
         EndUserStudentMap newMap = EndUserStudentMap.builder()
-                .user(savedUser)      // @MapsId에 의해 userId가 PK로 사용됨
+                .user(savedUser)
                 .student(studentRef)
                 .build();
 
-        mapRepo.saveAndFlush(newMap); // ✅ 즉시 반영
+        mapRepo.saveAndFlush(newMap);
 
         return savedUser;
     }
